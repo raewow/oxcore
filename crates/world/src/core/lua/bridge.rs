@@ -171,7 +171,7 @@ pub fn map_ai_event_to_callback(event: &AIEvent) -> Option<LuaCallback> {
         AIEvent::Spawned => Some(LuaCallback::OnSpawn),
         AIEvent::Respawned => Some(LuaCallback::JustRespawned),
         AIEvent::ReachedHome => Some(LuaCallback::JustReachedHome),
-        AIEvent::MovementComplete { point_id } => Some(LuaCallback::MovementInform {
+        AIEvent::MovementComplete { point_id, .. } => Some(LuaCallback::MovementInform {
             movement_type: 0, // TODO: pass movement type when available
             point_id: *point_id,
         }),
@@ -223,7 +223,11 @@ pub fn map_ai_event_to_callback(event: &AIEvent) -> Option<LuaCallback> {
         | AIEvent::UnitInRange { .. }
         | AIEvent::TimerExpired { .. }
         | AIEvent::UpdateTick { .. }
-        | AIEvent::AssistanceRequested { .. } => None,
+        | AIEvent::AssistanceRequested { .. }
+        | AIEvent::Engage { .. }
+        | AIEvent::GroupMemberDied { .. }
+        | AIEvent::ScriptEvent { .. }
+        | AIEvent::StealthAlert { .. } => None,
     }
 }
 

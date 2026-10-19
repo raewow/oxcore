@@ -45,6 +45,10 @@ impl RespawnSystem {
         // Pooled creatures re-roll their pool instead of respawning blindly:
         // the pool may replace this creature with another of its members
         // (PoolManager::UpdatePool on respawn).
+        // Linked creatures that may only exist while their master is alive (or dead) wait.
+        if !world.systems.linking.can_spawn(world, guid) {
+            return Ok(());
+        }
         if !world.systems.pool.on_creature_respawn(guid, world) {
             return Ok(());
         }
@@ -69,6 +73,19 @@ impl RespawnSystem {
         let Some((map_id, instance_id, position, entry, spawn_id)) = respawn_info else {
             return Ok(());
         };
+
+        // Scripts start over and hear about the respawn.
+        crate::game::creature::ai::forget_lua_state(guid);
+        crate::game::creature::ai::queue_event(
+            world,
+            guid,
+            crate::game::creature::ai::AIEvent::Respawned,
+        );
+        world
+            .systems
+            .linking
+            .on_event(world, guid, crate::game::coordination::LinkEvent::Respawn);
+        crate::game::creature::formation::on_member_respawn(world, guid);
 
         crate::game::common::respawn_persistence::clear_creature_respawn(
             world,
@@ -220,6 +237,7 @@ mod tests {
             loot_id: 0,
             pickpocket_loot_id: 0,
             skinning_loot_id: 0,
+            ai: Default::default(),
         }
     }
 

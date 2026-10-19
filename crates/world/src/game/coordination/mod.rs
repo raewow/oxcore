@@ -17,5 +17,5 @@ pub use pool_types::{
 
 pub use link_flags::{LinkEvent, LinkFlags};
 pub use linking_manager::{CreatureLink, LinkingManager};
-pub use linking_repository::{CreatureLinkRow, LinkingRepository};
+pub use linking_repository::{CreatureEntryLinkRow, CreatureLinkRow, LinkingRepository};
 pub use linking_system::LinkingSystem;

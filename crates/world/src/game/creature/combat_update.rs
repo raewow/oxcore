@@ -6,6 +6,7 @@
 //! By handling melee attacks here instead of through the AI decision pipeline,
 //! we eliminate the extra tick of latency from snapshot -> decision -> action -> execute.
 
+use crate::game::combat::melee_range::{self, DEFAULT_COMBAT_REACH};
 use crate::World;
 use oxcore_shared::protocol::ObjectGuid;
 
@@ -47,12 +48,11 @@ fn update_single_creature_combat(world: &World, creature_guid: ObjectGuid, diff_
                 creature.attack_timer = creature.attack_timer.saturating_sub(diff_ms);
             }
 
-            // If timer is ready and creature has an attack target, gather data for attack
-            if creature.attack_timer == 0 {
+            // Swing only when the timer is ready, there is a victim, and melee is
+            // possible (enabled, not stunned, confused, fleeing or pacified).
+            if creature.attack_timer == 0 && creature.can_melee() {
                 if let Some(target_guid) = creature.combat.attacking {
-                    if creature.is_alive() {
-                        return Some((target_guid, creature.position, creature.combat_reach));
-                    }
+                    return Some((target_guid, creature.position, creature.combat_reach));
                 }
             }
 
@@ -65,23 +65,29 @@ fn update_single_creature_combat(world: &World, creature_guid: ObjectGuid, diff_
         return;
     };
 
-    // Only handle creature -> player attacks
-    if !target_guid.is_player() {
-        return;
-    }
-
-    // Get target position for range check
-    let Some(target_pos) = world.managers.player_mgr.get_position(target_guid) else {
+    // Get target position and reach for the range check
+    let target = if target_guid.is_player() {
+        world
+            .managers
+            .player_mgr
+            .get_position(target_guid)
+            .map(|pos| (pos, DEFAULT_COMBAT_REACH))
+    } else {
+        world
+            .managers
+            .creature_mgr
+            .with_creature(target_guid, |c| (c.position, c.combat_reach))
+    };
+    let Some((target_pos, target_reach)) = target else {
         return;
     };
 
     // Check melee range (same formula used everywhere)
-    use crate::game::combat::melee_range::{self, DEFAULT_COMBAT_REACH};
     let in_range = melee_range::is_within_melee_range(
         &creature_pos,
         creature_reach,
         &target_pos,
-        DEFAULT_COMBAT_REACH,
+        target_reach,
         false, // no leeway for creature attacks
     );
 
@@ -99,7 +105,7 @@ fn update_single_creature_combat(world: &World, creature_guid: ObjectGuid, diff_
             .managers
             .creature_mgr
             .with_creature_mut(creature_guid, |creature| {
-                creature.attack_timer = 100;
+                creature.attack_timer = OUT_OF_RANGE_DELAY_MS;
             });
     }
 }

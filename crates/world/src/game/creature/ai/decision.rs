@@ -7,25 +7,21 @@
 //! 1. Capturing snapshot (brief lock)
 //! 2. Making decisions (no locks)
 //! 3. Executing actions (deterministic lock ordering)
+//!
+//! The victim is picked before the decision runs (see `target`), so the
+//! functions here only react to it: attack it, switch to it, or evade when
+//! victim selection says the fight is lost.
 
-use super::snapshot::{AIDecisionResult, AIInput, CreatureSnapshot, TargetSnapshot};
-use super::types::{AIAction, AIEvent, AIState, AIStateData, AIType, MovementType, ReactState};
+use super::snapshot::{AIDecisionResult, AIInput};
+use super::types::{AIAction, AIEvent, AIState, AIType, ReactState};
 use oxcore_shared::protocol::ObjectGuid;
 
-/// Maximum chase distance before evade
-const MAX_CHASE_DISTANCE: f32 = 45.0;
-/// Distance at which to start returning
-const EVADE_DISTANCE: f32 = 50.0;
 /// Home position "close enough" threshold
 const HOME_REACHED_DISTANCE: f32 = 3.0;
-/// Default melee attack range (unused, kept for reference - now uses combat reach formula)
-const _MELEE_RANGE: f32 = 5.0;
-/// How often to update AI (milliseconds)
-const AI_UPDATE_INTERVAL: u32 = 500;
-/// Critter flee duration when hit by a hostile non-damage spell (CritterAI ESCAPE_TIMER).
-const ESCAPE_TIMER_MS: u32 = 30000;
-/// Threat seeded when a fight starts without damage (aggro pull, missed swing).
-const INITIAL_AGGRO_THREAT: f32 = 1.0;
+/// Critters flee this long when scared, and evade this long after the last scare.
+pub const ESCAPE_TIMER_MS: u32 = 30000;
+/// How far a scared critter runs.
+const CRITTER_FLEE_DISTANCE: f32 = 20.0;
 
 /// Main decision entry point
 /// Routes to the appropriate AI type's decision function
@@ -35,103 +31,64 @@ pub fn decide(input: &AIInput) -> AIDecisionResult {
         return AIDecisionResult::new();
     }
 
-    // Update state data timers
-    let mut state_data = input.snapshot.ai_state_data.clone();
-    state_data.tick(input.diff_ms);
-
-    // Process events and make decisions based on AI type
-    let mut result = match input.snapshot.ai_type {
+    match input.snapshot.ai_type {
         AIType::Null => decide_null(input),
-        AIType::Passive => decide_passive(input),
         AIType::Critter => decide_critter(input),
-        AIType::Basic => decide_basic(input),
         AIType::Totem => decide_totem(input),
         AIType::Pet => decide_pet(input),
-        AIType::Guard => decide_guard(input),
-        AIType::Event => decide_event(input),
-        AIType::Lua => decide_lua(input),
-    };
-
-    // Update state data in result
-    result.updated_state_data = Some(state_data);
-    result
-}
-
-/// Null AI - does nothing
-fn decide_null(_input: &AIInput) -> AIDecisionResult {
-    AIDecisionResult::new()
-}
-
-/// Passive AI - does not fight back, only returns to spawn if too far
-fn decide_passive(input: &AIInput) -> AIDecisionResult {
-    let mut result = AIDecisionResult::new();
-
-    // Check if too far from home
-    if input.snapshot.distance_to_home() > EVADE_DISTANCE {
-        result.actions.push(AIAction::ReturnToSpawn);
-    }
-
-    // Process events
-    for event in &input.events {
-        match event {
-            AIEvent::ReachedHome => {
-                result.actions.push(AIAction::LeaveCombat);
-            }
-            _ => {}
+        AIType::Passive | AIType::Basic | AIType::Guard | AIType::Event | AIType::Lua => {
+            decide_basic(input)
         }
     }
+}
 
+/// Null AI: never starts or answers a fight, but still evades properly when
+/// something put it in combat.
+fn decide_null(input: &AIInput) -> AIDecisionResult {
+    let mut result = AIDecisionResult::new();
+    result.actions.extend(return_home_behavior(input));
+    if input.snapshot.ai_state == AIState::Combat && input.evade_requested {
+        result.actions.push(AIAction::EnterEvadeMode);
+    }
     result
 }
 
-/// Critter AI - flees when damaged, wanders randomly
+/// Critter AI: never attacks. Damage or a hostile non-damage spell makes it run
+/// from the source for thirty seconds; thirty seconds after the last scare it
+/// evades.
 fn decide_critter(input: &AIInput) -> AIDecisionResult {
     let mut result = AIDecisionResult::new();
+    let mut scared = false;
 
     for event in &input.events {
-        match event {
-            AIEvent::DamageTaken { attacker_guid, .. }
-            // CritterAI::AttackedBy — a missed swing scares the critter just the same.
-            | AIEvent::AttackedBy { attacker_guid } => {
-                // Flee from attacker
-                if input.snapshot.ai_state != AIState::Fleeing {
-                    result.actions.push(AIAction::FleeFrom {
-                        flee_from_guid: *attacker_guid,
-                        distance: 20.0,
-                        duration_ms: 5000,
-                    });
-                }
-            }
+        let source = match event {
+            AIEvent::DamageTaken { attacker_guid, .. } => Some(*attacker_guid),
             AIEvent::SpellHit {
                 caster_guid,
                 spell_is_positive,
                 spell_is_direct_damage,
                 ..
-            } => {
-                // CritterAI::SpellHit — flee from the caster of a hostile,
-                // non-direct-damage spell (aliveness already ensured by decide()).
-                // Direct-damage hostile spells arrive as DamageTaken instead.
-                if !spell_is_positive
-                    && !spell_is_direct_damage
-                    && input.snapshot.ai_state != AIState::Fleeing
-                {
-                    result.actions.push(AIAction::FleeFrom {
-                        flee_from_guid: *caster_guid,
-                        distance: 20.0,
-                        duration_ms: ESCAPE_TIMER_MS,
-                    });
-                }
+            } if !spell_is_positive && !spell_is_direct_damage => Some(*caster_guid),
+            _ => None,
+        };
+        if let Some(source) = source {
+            scared = true;
+            if input.snapshot.ai_state != AIState::Fleeing {
+                result.actions.push(AIAction::FleeFrom {
+                    flee_from_guid: source,
+                    distance: CRITTER_FLEE_DISTANCE,
+                    duration_ms: ESCAPE_TIMER_MS,
+                });
             }
-            AIEvent::UpdateTick { .. } => {
-                // Random wandering when idle
-                if input.snapshot.ai_state == AIState::Idle {
-                    // TODO: Add random movement timer
-                }
-            }
-            _ => {}
         }
     }
 
+    if scared {
+        result.actions.push(AIAction::ResetCritterEscape);
+    } else if input.snapshot.in_combat && input.snapshot.ai_state_data.critter_escape_ms == 0 {
+        result.actions.push(AIAction::EnterEvadeMode);
+    }
+    result.actions.extend(return_home_behavior(input));
     result
 }
 
@@ -152,96 +109,46 @@ fn decide_basic(input: &AIInput) -> AIDecisionResult {
     result
 }
 
-/// State-based continuous combat behavior (chase, evade, return home, spell casting).
+/// Walking home after an evade: arrive, or keep going.
+fn return_home_behavior(input: &AIInput) -> Vec<AIAction> {
+    match input.snapshot.ai_state {
+        AIState::Evading => vec![AIAction::ReturnToSpawn],
+        AIState::Returning if input.snapshot.distance_to_home() <= HOME_REACHED_DISTANCE => {
+            vec![AIAction::ReachedHome]
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// State-based continuous combat behavior (chase, evade, return home).
 /// Used by both `decide_basic()` and Lua AI.
 pub fn basic_combat_behavior(input: &AIInput) -> Vec<AIAction> {
     let mut actions = Vec::new();
 
     match input.snapshot.ai_state {
         AIState::Combat => {
-            // Check evade distance
-            if input.snapshot.distance_to_home() > EVADE_DISTANCE {
+            if input.evade_requested {
                 actions.push(AIAction::EnterEvadeMode);
                 return actions;
             }
-
-            // Get top threat target
-            if let Some(target_guid) = input.snapshot.get_top_threat_target() {
-                // Check if target is valid
-                if let Some(target) = input.nearby_targets.iter().find(|t| t.guid == target_guid) {
-                    if target.is_alive {
-                        // Set attack target if different
-                        if input.snapshot.current_target != Some(target_guid) {
-                            actions.push(AIAction::SetAttackTarget { target_guid });
-                        }
-
-                        // Check if in melee range using combat reach formula
-                        use crate::game::combat::melee_range;
-                        let melee_reach = melee_range::get_melee_reach(
-                            input.snapshot.combat_reach,
-                            melee_range::DEFAULT_COMBAT_REACH, // target (player) reach
-                            false,                             // no leeway for AI
-                        );
-                        let distance = input.snapshot.distance_to_2d(&target.position);
-                        // Try to cast a spell first (if any are available and off cooldown)
-                        let spell_cast = try_select_spell(input, target_guid, distance);
-                        if let Some(spell_action) = spell_cast {
-                            actions.push(spell_action);
-                        }
-
-                        if distance <= melee_reach {
-                            // In range — face target
-                            // No StopMovement here: chase generator handles stopping
-                            // Melee attacks are handled directly by combat_update.rs
-                            // (DoMeleeAttackIfReady is separate from AI decisions)
-                            actions.push(AIAction::FaceTarget { target_guid });
-                        }
-                        // No else MoveToTarget — chase generator handles approach
-                    } else {
-                        // Target is dead, clear it
-                        actions.push(AIAction::ClearAttackTarget);
-                    }
-                } else {
-                    // Target not in nearby targets list (out of range or gone)
-                    // Keep current target but try to find new one
-                    if input.snapshot.target_count() == 0 {
-                        actions.push(AIAction::EnterEvadeMode);
-                    }
+            if let Some(victim) = &input.victim {
+                if input.snapshot.current_target != Some(victim.guid) {
+                    actions.push(AIAction::SetAttackTarget {
+                        target_guid: victim.guid,
+                    });
                 }
-            } else {
-                // No targets, evade
-                actions.push(AIAction::EnterEvadeMode);
-            }
-        }
-        AIState::Evading => {
-            // Immediately transition to returning
-            actions.push(AIAction::ReturnToSpawn);
-        }
-        AIState::Returning => {
-            // Check if reached home
-            if input.snapshot.distance_to_home() <= HOME_REACHED_DISTANCE {
-                actions.push(AIAction::LeaveCombat);
-            } else {
-                // Continue returning home
-                actions.push(AIAction::MoveTo {
-                    position: input.snapshot.home_position,
-                    movement_type: MovementType::Run,
+                actions.push(AIAction::FaceTarget {
+                    target_guid: victim.guid,
                 });
             }
         }
+        AIState::Evading | AIState::Returning => actions.extend(return_home_behavior(input)),
         AIState::Idle => {
-            // Check if we should be in combat (has targets)
-            if input.snapshot.has_targets() {
-                if let Some(target) = input.snapshot.get_top_threat_target() {
-                    actions.push(AIAction::EnterCombat {
-                        target_guid: target,
-                    });
-                    // Without this the creature enters combat with no attack target
-                    // and the chase generator never learns where the target is.
-                    actions.push(AIAction::SetAttackTarget {
-                        target_guid: target,
-                    });
-                }
+            // Threat put on an idle creature (by a spell, a script) starts the fight.
+            if let Some(target) = input.snapshot.threat_list.first() {
+                actions.push(AIAction::EnterCombat {
+                    target_guid: target.target,
+                });
             }
         }
         _ => {}
@@ -250,196 +157,113 @@ pub fn basic_combat_behavior(input: &AIInput) -> Vec<AIAction> {
     actions
 }
 
-/// Engage an attacker: enter combat, set it as the attack target and seed threat.
-///
-/// `EnterCombat` alone is not enough — the chase generator is only fed the target's
-/// live position while `combat.attacking` is set, so a creature that enters combat
-/// without an attack target chases the default (0,0,0) position instead.
-fn engage_attacker(input: &AIInput, attacker_guid: ObjectGuid, threat: f32) -> Vec<AIAction> {
-    let mut actions = Vec::new();
-
+/// Engage an attacker the way an attacked creature does: start attacking it when
+/// it has no victim yet, otherwise just put it on the threat list. A creature
+/// walking home after an evade ignores attacks.
+fn engage_attacker(input: &AIInput, attacker_guid: ObjectGuid) -> Vec<AIAction> {
     match input.snapshot.ai_state {
-        // Already fighting: only the threat matters, the target is picked by threat.
-        AIState::Combat => {
-            actions.push(AIAction::AddThreat {
-                target_guid: attacker_guid,
-                amount: threat,
-            });
-        }
-        AIState::Idle | AIState::Returning | AIState::Evading => {
-            actions.push(AIAction::EnterCombat {
-                target_guid: attacker_guid,
-            });
-            actions.push(AIAction::SetAttackTarget {
-                target_guid: attacker_guid,
-            });
-            actions.push(AIAction::AddThreat {
-                target_guid: attacker_guid,
-                amount: threat,
-            });
-        }
-        _ => {}
+        AIState::Evading | AIState::Returning | AIState::Dead => Vec::new(),
+        AIState::Combat if input.snapshot.current_target.is_some() => vec![AIAction::AddThreat {
+            target_guid: attacker_guid,
+            amount: 0.0,
+        }],
+        _ => attack_start(input, attacker_guid),
     }
+}
 
-    actions
+/// Start attacking `target_guid`, unless the creature is passive.
+fn attack_start(input: &AIInput, target_guid: ObjectGuid) -> Vec<AIAction> {
+    if input.snapshot.ai_state_data.react_state == ReactState::Passive {
+        return Vec::new();
+    }
+    vec![AIAction::EnterCombat { target_guid }]
 }
 
 /// Process a single event for Basic AI.
 /// Also used by Lua AI for core combat management (enter combat, add threat).
 pub fn process_basic_event(input: &AIInput, event: &AIEvent) -> Vec<AIAction> {
-    let mut actions = Vec::new();
-
     match event {
+        // The aggro scan has already applied every proximity rule.
         AIEvent::UnitInRange {
             unit_guid,
-            is_hostile,
+            is_hostile: true,
             ..
-        } => {
-            // Only aggro if we're idle and the unit is hostile
-            if input.snapshot.ai_state == AIState::Idle && *is_hostile {
-                actions.push(AIAction::EnterCombat {
-                    target_guid: *unit_guid,
-                });
-                actions.push(AIAction::SetAttackTarget {
-                    target_guid: *unit_guid,
-                });
-                actions.push(AIAction::AddThreat {
-                    target_guid: *unit_guid,
-                    amount: 1.0, // Initial threat from aggro
-                });
-            }
-        }
-        // A connecting swing and a missed one both start the fight. A miss carries no damage,
-        // so it seeds the same initial threat an aggro pull would.
-        AIEvent::AttackedBy { attacker_guid } => {
-            actions.extend(engage_attacker(input, *attacker_guid, INITIAL_AGGRO_THREAT));
-        }
-        AIEvent::DamageTaken {
-            attacker_guid,
-            damage,
-            ..
-        } => {
-            // Enter combat and fight back when idle or returning, otherwise just threat.
-            actions.extend(engage_attacker(input, *attacker_guid, *damage as f32));
-        }
-        AIEvent::TargetKilled { victim_guid } => {
-            // Clear the killed target
-            if input.snapshot.current_target == Some(*victim_guid) {
-                actions.push(AIAction::ClearAttackTarget);
-            }
-            actions.push(AIAction::ModifyThreat {
-                target_guid: *victim_guid,
+        } => match input.snapshot.ai_state {
+            AIState::Idle => attack_start(input, *unit_guid),
+            // Joining the fight without switching victims (dungeons).
+            AIState::Combat => vec![AIAction::AddThreat {
+                target_guid: *unit_guid,
                 amount: 0.0,
-                is_percent: false,
-            });
+            }],
+            _ => Vec::new(),
+        },
+        // A hit, a miss or a hostile spell: the damage itself already counted as threat.
+        AIEvent::AttackedBy { attacker_guid } | AIEvent::DamageTaken { attacker_guid, .. } => {
+            engage_attacker(input, *attacker_guid)
         }
-        AIEvent::ReachedHome => {
-            actions.push(AIAction::LeaveCombat);
-            actions.push(AIAction::ClearThreatList);
-            actions.push(AIAction::ClearAttackTarget);
+        AIEvent::Engage { target_guid } | AIEvent::AssistanceRequested { target_guid, .. } => {
+            engage_attacker(input, *target_guid)
         }
-        _ => {}
+        _ => Vec::new(),
     }
-
-    actions
 }
 
-/// Totem AI - stationary spell caster
+/// Totem AI: stationary, never melees, never chases.
 fn decide_totem(input: &AIInput) -> AIDecisionResult {
     let mut result = AIDecisionResult::new();
-
-    // Totems don't move, just cast spells
-    for event in &input.events {
-        match event {
-            AIEvent::UpdateTick { .. } => {
-                // Check for spells to cast
-                // TODO: Implement totem spell casting
-            }
-            _ => {}
-        }
+    if input.snapshot.ai_state == AIState::Combat && input.evade_requested {
+        result.actions.push(AIAction::EnterEvadeMode);
     }
-
     result
 }
 
-/// Pet AI - follows owner and assists
+/// Pet AI: follows the owner (set up by the pet system) and defends itself
+/// and its owner; it never acquires targets by proximity.
 fn decide_pet(input: &AIInput) -> AIDecisionResult {
-    // TODO: Implement pet AI
-    AIDecisionResult::new()
-}
-
-/// Guard AI - like basic but calls for help
-fn decide_guard(input: &AIInput) -> AIDecisionResult {
-    // Start with basic AI behavior
-    let mut result = decide_basic(input);
-
-    // Add guard-specific behavior
+    let mut result = AIDecisionResult::new();
     for event in &input.events {
         match event {
-            AIEvent::DamageTaken { .. } => {
-                // Call for help when damaged
-                if input.snapshot.ai_state == AIState::Combat {
-                    result.actions.push(AIAction::CallForHelp { radius: 30.0 });
-                }
+            AIEvent::AttackedBy { attacker_guid } | AIEvent::DamageTaken { attacker_guid, .. }
+                if input.snapshot.current_target.is_none()
+                    && input.snapshot.ai_state_data.react_state != ReactState::Passive =>
+            {
+                result.actions.push(AIAction::EnterCombat {
+                    target_guid: *attacker_guid,
+                });
+            }
+            AIEvent::Engage { target_guid }
+                if input.snapshot.ai_state_data.react_state != ReactState::Passive =>
+            {
+                result.actions.push(AIAction::SetAttackTarget {
+                    target_guid: *target_guid,
+                });
+                result.actions.push(AIAction::EnterCombat {
+                    target_guid: *target_guid,
+                });
             }
             _ => {}
         }
     }
-
-    result
-}
-
-/// Event AI - database-driven scripted behavior
-fn decide_event(input: &AIInput) -> AIDecisionResult {
-    // TODO: Implement event AI (creature_ai_scripts table)
-    decide_basic(input)
-}
-
-/// Lua AI - script-driven behavior
-fn decide_lua(input: &AIInput) -> AIDecisionResult {
-    // TODO: Implement Lua script integration
-    // For now, fall back to basic AI
-    decide_basic(input)
-}
-
-/// Try to select a spell for the creature to cast at its target.
-///
-/// Iterates creature's spell list (spell1-4), picks the first spell that is:
-/// - Non-zero (slot has a spell)
-/// - Off cooldown (checked via AIStateData)
-/// - Caster has enough mana
-///
-/// Returns a CastSpell action if a spell was selected, None otherwise.
-fn try_select_spell(input: &AIInput, target_guid: ObjectGuid, _distance: f32) -> Option<AIAction> {
-    let snapshot = &input.snapshot;
-
-    for &spell_id in &snapshot.spells {
-        if spell_id == 0 {
-            continue;
+    if input.snapshot.ai_state == AIState::Combat {
+        if let Some(victim) = &input.victim {
+            if input.snapshot.current_target != Some(victim.guid) {
+                result.actions.push(AIAction::SetAttackTarget {
+                    target_guid: victim.guid,
+                });
+            }
+        } else if input.evade_requested {
+            // A pet without a victim goes back to following its owner.
+            result.actions.push(AIAction::PetFollowOwner);
         }
-
-        // Check cooldown
-        if !snapshot.ai_state_data.is_spell_ready(spell_id) {
-            continue;
-        }
-
-        // Spell is available - return cast action
-        // Mana check and range validation happen in the executor
-        return Some(AIAction::CastSpell {
-            spell_id,
-            target_guid: Some(target_guid),
-            target_position: None,
-            triggered: false,
-        });
     }
-
-    None
+    result
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::game::creature::ai::snapshot::ThreatEntry;
+    use crate::game::creature::ai::snapshot::{CreatureSnapshot, TargetSnapshot, ThreatEntry};
+    use crate::game::creature::ai::types::{AIStateData, CreatureAiProfile};
     use oxcore_shared::protocol::{HighGuid, ObjectGuid, Position};
 
     fn player_guid(id: u32) -> ObjectGuid {
@@ -468,7 +292,7 @@ mod tests {
             in_combat: ai_state == AIState::Combat,
             is_alive: true,
             attack_timer_ready: false,
-            ai_state_data: AIStateData::default(),
+            ai_state_data: AIStateData::new(),
             combat_reach: 1.5,
             spells: [0; 4],
             current_mana: 0,
@@ -476,27 +300,28 @@ mod tests {
             level: 10,
             unit_class: 0,
             auras: Vec::new(),
+            profile: CreatureAiProfile::default(),
+            static_flags1: 0,
+            owner: None,
         }
     }
 
-    fn make_input(
-        snapshot: CreatureSnapshot,
-        events: Vec<AIEvent>,
-        nearby_targets: Vec<TargetSnapshot>,
-    ) -> AIInput {
+    fn make_input(snapshot: CreatureSnapshot, events: Vec<AIEvent>) -> AIInput {
         AIInput {
             snapshot,
             events,
             diff_ms: 50,
-            nearby_targets,
+            nearby_targets: Vec::new(),
+            victim: None,
+            evade_requested: false,
         }
     }
 
-    fn make_target(guid: ObjectGuid, pos: Position, is_alive: bool) -> TargetSnapshot {
+    fn target(guid: ObjectGuid) -> TargetSnapshot {
         TargetSnapshot {
             guid,
-            position: pos,
-            is_alive,
+            position: Position::new(100.0, 100.0, 0.0, 0.0),
+            is_alive: true,
             is_player: true,
             health_pct: 1.0,
             has_mana: false,
@@ -507,364 +332,194 @@ mod tests {
         actions.iter().any(check)
     }
 
-    // ========== process_basic_event tests ==========
-
     #[test]
-    fn test_unit_in_range_while_idle_enters_combat() {
+    fn proximity_aggro_while_idle_attacks() {
         let target = player_guid(10);
-        let input = make_input(make_snapshot(AIState::Idle), vec![], vec![]);
+        let input = make_input(make_snapshot(AIState::Idle), vec![]);
         let event = AIEvent::UnitInRange {
             unit_guid: target,
             distance: 15.0,
             is_hostile: true,
             is_player: true,
         };
-
         let actions = process_basic_event(&input, &event);
-
-        assert!(has_action(&actions, |a| matches!(
-            a,
-            AIAction::EnterCombat { .. }
-        )));
         assert!(has_action(
             &actions,
-            |a| matches!(a, AIAction::SetAttackTarget { target_guid } if *target_guid == target)
+            |a| matches!(a, AIAction::EnterCombat { target_guid } if *target_guid == target)
         ));
-        assert!(has_action(&actions, |a| matches!(
-            a,
-            AIAction::AddThreat { .. }
-        )));
     }
 
     #[test]
-    fn test_unit_in_range_while_combat_ignored() {
+    fn proximity_aggro_in_combat_only_joins_the_threat_list() {
         let target = player_guid(10);
-        let input = make_input(make_snapshot(AIState::Combat), vec![], vec![]);
+        let mut snapshot = make_snapshot(AIState::Combat);
+        snapshot.current_target = Some(player_guid(1));
+        let input = make_input(snapshot, vec![]);
         let event = AIEvent::UnitInRange {
             unit_guid: target,
             distance: 15.0,
             is_hostile: true,
             is_player: true,
         };
-
         let actions = process_basic_event(&input, &event);
-        assert!(actions.is_empty());
-    }
-
-    #[test]
-    fn test_unit_in_range_non_hostile_ignored() {
-        let target = player_guid(10);
-        let input = make_input(make_snapshot(AIState::Idle), vec![], vec![]);
-        let event = AIEvent::UnitInRange {
-            unit_guid: target,
-            distance: 15.0,
-            is_hostile: false,
-            is_player: true,
-        };
-
-        let actions = process_basic_event(&input, &event);
-        assert!(actions.is_empty());
-    }
-
-    #[test]
-    fn test_damage_taken_while_idle_enters_combat() {
-        let attacker = player_guid(10);
-        let input = make_input(make_snapshot(AIState::Idle), vec![], vec![]);
-        let event = AIEvent::DamageTaken {
-            attacker_guid: attacker,
-            damage: 50,
-            spell_id: None,
-            school: 0,
-        };
-
-        let actions = process_basic_event(&input, &event);
-
-        assert!(has_action(&actions, |a| matches!(
-            a,
-            AIAction::EnterCombat { .. }
-        )));
-        assert!(has_action(
-            &actions,
-            |a| matches!(a, AIAction::SetAttackTarget { target_guid } if *target_guid == attacker)
-        ));
-        assert!(has_action(
-            &actions,
-            |a| matches!(a, AIAction::AddThreat { amount, .. } if *amount == 50.0)
+        assert!(matches!(
+            actions.as_slice(),
+            [AIAction::AddThreat { target_guid, amount }] if *target_guid == target && *amount == 0.0
         ));
     }
 
     #[test]
-    fn test_attacked_by_while_idle_engages_attacker() {
-        // A missed first swing must still pull the creature: enter combat, pick the
-        // attacker as attack target (the chase generator needs it) and seed threat.
-        let attacker = player_guid(10);
-        let input = make_input(make_snapshot(AIState::Idle), vec![], vec![]);
-        let event = AIEvent::AttackedBy {
-            attacker_guid: attacker,
-        };
-
-        let actions = process_basic_event(&input, &event);
-
-        assert!(has_action(
-            &actions,
-            |a| matches!(a, AIAction::EnterCombat { target_guid } if *target_guid == attacker)
-        ));
-        assert!(has_action(
-            &actions,
-            |a| matches!(a, AIAction::SetAttackTarget { target_guid } if *target_guid == attacker)
-        ));
-        assert!(has_action(
-            &actions,
-            |a| matches!(a, AIAction::AddThreat { amount, .. } if *amount == INITIAL_AGGRO_THREAT)
-        ));
-    }
-
-    #[test]
-    fn test_attacked_by_while_in_combat_only_adds_threat() {
-        let attacker = player_guid(10);
-        let input = make_input(make_snapshot(AIState::Combat), vec![], vec![]);
-        let event = AIEvent::AttackedBy {
-            attacker_guid: attacker,
-        };
-
-        let actions = process_basic_event(&input, &event);
-
-        assert!(!has_action(&actions, |a| matches!(
-            a,
-            AIAction::EnterCombat { .. }
-        )));
-        assert!(has_action(&actions, |a| matches!(
-            a,
-            AIAction::AddThreat { .. }
-        )));
-    }
-
-    #[test]
-    fn critter_flees_from_a_missed_swing() {
-        let attacker = player_guid(10);
+    fn passive_creatures_never_start_a_fight() {
         let mut snapshot = make_snapshot(AIState::Idle);
-        snapshot.ai_type = AIType::Critter;
-        let input = make_input(
-            snapshot,
-            vec![AIEvent::AttackedBy {
-                attacker_guid: attacker,
-            }],
-            vec![],
-        );
-
-        let result = decide(&input);
-
-        assert!(has_action(&result.actions, |a| matches!(
-            a,
-            AIAction::FleeFrom { flee_from_guid, .. } if *flee_from_guid == attacker
-        )));
+        snapshot.ai_state_data.react_state = ReactState::Passive;
+        let input = make_input(snapshot, vec![]);
+        let event = AIEvent::AttackedBy {
+            attacker_guid: player_guid(10),
+        };
+        assert!(process_basic_event(&input, &event).is_empty());
     }
 
     #[test]
-    fn test_damage_taken_while_combat_adds_threat() {
+    fn damage_does_not_add_threat_a_second_time() {
         let attacker = player_guid(10);
-        let input = make_input(make_snapshot(AIState::Combat), vec![], vec![]);
+        let mut snapshot = make_snapshot(AIState::Combat);
+        snapshot.current_target = Some(attacker);
+        let input = make_input(snapshot, vec![]);
         let event = AIEvent::DamageTaken {
             attacker_guid: attacker,
             damage: 100,
             spell_id: None,
             school: 0,
         };
-
         let actions = process_basic_event(&input, &event);
-
         assert!(!has_action(&actions, |a| matches!(
             a,
-            AIAction::EnterCombat { .. }
+            AIAction::AddThreat { amount, .. } if *amount > 0.0
         )));
-        assert!(has_action(
-            &actions,
-            |a| matches!(a, AIAction::AddThreat { amount, .. } if *amount == 100.0)
-        ));
     }
 
     #[test]
-    fn test_damage_taken_while_returning_reengages() {
+    fn damage_while_idle_starts_the_fight() {
         let attacker = player_guid(10);
-        let input = make_input(make_snapshot(AIState::Returning), vec![], vec![]);
+        let input = make_input(make_snapshot(AIState::Idle), vec![]);
         let event = AIEvent::DamageTaken {
             attacker_guid: attacker,
-            damage: 30,
+            damage: 50,
             spell_id: None,
             school: 0,
         };
-
         let actions = process_basic_event(&input, &event);
-        assert!(has_action(&actions, |a| matches!(
-            a,
-            AIAction::EnterCombat { .. }
-        )));
-    }
-
-    #[test]
-    fn test_reached_home_leaves_combat() {
-        let input = make_input(make_snapshot(AIState::Returning), vec![], vec![]);
-        let event = AIEvent::ReachedHome;
-
-        let actions = process_basic_event(&input, &event);
-
-        assert!(has_action(&actions, |a| matches!(a, AIAction::LeaveCombat)));
-        assert!(has_action(&actions, |a| matches!(
-            a,
-            AIAction::ClearThreatList
-        )));
-        assert!(has_action(&actions, |a| matches!(
-            a,
-            AIAction::ClearAttackTarget
-        )));
-    }
-
-    #[test]
-    fn test_target_killed_clears_target() {
-        let victim = player_guid(10);
-        let mut snapshot = make_snapshot(AIState::Combat);
-        snapshot.current_target = Some(victim);
-        let input = make_input(snapshot, vec![], vec![]);
-        let event = AIEvent::TargetKilled {
-            victim_guid: victim,
-        };
-
-        let actions = process_basic_event(&input, &event);
-
-        assert!(has_action(&actions, |a| matches!(
-            a,
-            AIAction::ClearAttackTarget
-        )));
         assert!(has_action(
             &actions,
-            |a| matches!(a, AIAction::ModifyThreat { target_guid, .. } if *target_guid == victim)
+            |a| matches!(a, AIAction::EnterCombat { target_guid } if *target_guid == attacker)
         ));
     }
 
-    // ========== basic_combat_behavior tests ==========
+    #[test]
+    fn evading_creatures_ignore_attacks() {
+        for state in [AIState::Evading, AIState::Returning] {
+            let input = make_input(make_snapshot(state), vec![]);
+            let event = AIEvent::DamageTaken {
+                attacker_guid: player_guid(10),
+                damage: 30,
+                spell_id: None,
+                school: 0,
+            };
+            assert!(process_basic_event(&input, &event).is_empty());
+        }
+    }
 
     #[test]
-    fn test_combat_state_evades_when_too_far() {
+    fn combat_switches_to_the_selected_victim() {
+        let victim = player_guid(2);
         let mut snapshot = make_snapshot(AIState::Combat);
-        // Place creature far from home
-        snapshot.position = Position::new(200.0, 200.0, 0.0, 0.0);
-        snapshot.threat_list.push(ThreatEntry {
-            target: player_guid(10),
-            threat: 10.0,
-        });
-        let input = make_input(snapshot, vec![], vec![]);
-
+        snapshot.current_target = Some(player_guid(1));
+        let mut input = make_input(snapshot, vec![]);
+        input.victim = Some(target(victim));
         let actions = basic_combat_behavior(&input);
-        assert!(has_action(&actions, |a| matches!(
+        assert!(has_action(
+            &actions,
+            |a| matches!(a, AIAction::SetAttackTarget { target_guid } if *target_guid == victim)
+        ));
+    }
+
+    #[test]
+    fn evade_request_evades() {
+        let mut input = make_input(make_snapshot(AIState::Combat), vec![]);
+        input.evade_requested = true;
+        assert!(has_action(&basic_combat_behavior(&input), |a| matches!(
             a,
             AIAction::EnterEvadeMode
         )));
     }
 
     #[test]
-    fn test_combat_state_faces_target_in_melee_range() {
-        let target = player_guid(10);
-        let mut snapshot = make_snapshot(AIState::Combat);
-        snapshot.current_target = Some(target);
-        snapshot.threat_list.push(ThreatEntry {
-            target,
-            threat: 10.0,
-        });
-        // Target at same position (distance 0, within melee range)
-        let target_snap = make_target(target, Position::new(100.0, 100.0, 0.0, 0.0), true);
-        let input = make_input(snapshot, vec![], vec![target_snap]);
-
-        let actions = basic_combat_behavior(&input);
-        assert!(has_action(
-            &actions,
-            |a| matches!(a, AIAction::FaceTarget { target_guid } if *target_guid == target)
-        ));
+    fn no_victim_without_evade_request_holds() {
+        let input = make_input(make_snapshot(AIState::Combat), vec![]);
+        assert!(basic_combat_behavior(&input).is_empty());
     }
 
     #[test]
-    fn test_combat_state_evades_with_no_targets() {
-        let snapshot = make_snapshot(AIState::Combat);
-        // Empty threat list
-        let input = make_input(snapshot, vec![], vec![]);
-
-        let actions = basic_combat_behavior(&input);
-        assert!(has_action(&actions, |a| matches!(
-            a,
-            AIAction::EnterEvadeMode
-        )));
-    }
-
-    #[test]
-    fn test_combat_state_clears_dead_target() {
-        let target = player_guid(10);
-        let mut snapshot = make_snapshot(AIState::Combat);
-        snapshot.current_target = Some(target);
-        snapshot.threat_list.push(ThreatEntry {
-            target,
-            threat: 10.0,
-        });
-        let target_snap = make_target(target, Position::new(100.0, 100.0, 0.0, 0.0), false); // dead
-        let input = make_input(snapshot, vec![], vec![target_snap]);
-
-        let actions = basic_combat_behavior(&input);
-        assert!(has_action(&actions, |a| matches!(
-            a,
-            AIAction::ClearAttackTarget
-        )));
-    }
-
-    #[test]
-    fn test_evading_state_returns_to_spawn() {
-        let snapshot = make_snapshot(AIState::Evading);
-        let input = make_input(snapshot, vec![], vec![]);
-
-        let actions = basic_combat_behavior(&input);
-        assert!(has_action(&actions, |a| matches!(
+    fn evading_walks_home_and_arrives() {
+        let input = make_input(make_snapshot(AIState::Evading), vec![]);
+        assert!(has_action(&basic_combat_behavior(&input), |a| matches!(
             a,
             AIAction::ReturnToSpawn
         )));
+        let input = make_input(make_snapshot(AIState::Returning), vec![]);
+        assert!(has_action(&basic_combat_behavior(&input), |a| matches!(
+            a,
+            AIAction::ReachedHome
+        )));
     }
 
     #[test]
-    fn test_returning_state_leaves_combat_at_home() {
-        let snapshot = make_snapshot(AIState::Returning);
-        // Position is already at home (same default position)
-        let input = make_input(snapshot, vec![], vec![]);
-
-        let actions = basic_combat_behavior(&input);
-        assert!(has_action(&actions, |a| matches!(a, AIAction::LeaveCombat)));
-    }
-
-    #[test]
-    fn test_idle_state_enters_combat_if_has_targets() {
+    fn idle_with_threat_starts_the_fight() {
         let target = player_guid(10);
         let mut snapshot = make_snapshot(AIState::Idle);
         snapshot.threat_list.push(ThreatEntry {
             target,
             threat: 5.0,
         });
-        let input = make_input(snapshot, vec![], vec![]);
-
-        let actions = basic_combat_behavior(&input);
+        let input = make_input(snapshot, vec![]);
         assert!(has_action(
-            &actions,
+            &basic_combat_behavior(&input),
             |a| matches!(a, AIAction::EnterCombat { target_guid } if *target_guid == target)
-        ));
-        // Entering combat without an attack target leaves the chase generator
-        // pointed at its default (0,0,0) position.
-        assert!(has_action(
-            &actions,
-            |a| matches!(a, AIAction::SetAttackTarget { target_guid } if *target_guid == target)
         ));
     }
 
     #[test]
-    fn test_idle_state_no_action_without_targets() {
-        let snapshot = make_snapshot(AIState::Idle);
-        let input = make_input(snapshot, vec![], vec![]);
+    fn critter_flees_from_damage_for_thirty_seconds() {
+        let attacker = player_guid(10);
+        let mut snapshot = make_snapshot(AIState::Idle);
+        snapshot.ai_type = AIType::Critter;
+        let input = make_input(
+            snapshot,
+            vec![AIEvent::DamageTaken {
+                attacker_guid: attacker,
+                damage: 1,
+                spell_id: None,
+                school: 0,
+            }],
+        );
+        let result = decide(&input);
+        assert!(has_action(&result.actions, |a| matches!(
+            a,
+            AIAction::FleeFrom { flee_from_guid, duration_ms: ESCAPE_TIMER_MS, .. } if *flee_from_guid == attacker
+        )));
+    }
 
-        let actions = basic_combat_behavior(&input);
-        assert!(actions.is_empty());
+    #[test]
+    fn critter_ignores_a_missed_swing() {
+        let mut snapshot = make_snapshot(AIState::Idle);
+        snapshot.ai_type = AIType::Critter;
+        let input = make_input(
+            snapshot,
+            vec![AIEvent::AttackedBy {
+                attacker_guid: player_guid(10),
+            }],
+        );
+        assert!(decide(&input).actions.is_empty());
     }
 
     #[test]
@@ -880,18 +535,10 @@ mod tests {
                 spell_is_positive: false,
                 spell_is_direct_damage: false,
             }],
-            vec![],
         );
-
-        let result = decide(&input);
-
-        assert!(has_action(&result.actions, |action| matches!(
-            action,
-            AIAction::FleeFrom {
-                flee_from_guid,
-                duration_ms: ESCAPE_TIMER_MS,
-                ..
-            } if *flee_from_guid == caster
+        assert!(has_action(&decide(&input).actions, |a| matches!(
+            a,
+            AIAction::FleeFrom { flee_from_guid, .. } if *flee_from_guid == caster
         )));
     }
 
@@ -916,53 +563,33 @@ mod tests {
                     spell_is_direct_damage: true,
                 },
             ],
-            vec![],
         );
-
         assert!(decide(&input).actions.is_empty());
     }
 
     #[test]
-    fn critter_spell_hit_does_not_restart_an_existing_flee() {
-        let caster = player_guid(10);
+    fn critter_evades_after_the_escape_timer() {
         let mut snapshot = make_snapshot(AIState::Fleeing);
         snapshot.ai_type = AIType::Critter;
-        let input = make_input(
-            snapshot,
-            vec![AIEvent::SpellHit {
-                caster_guid: caster,
-                spell_id: 123,
-                spell_is_positive: false,
-                spell_is_direct_damage: false,
-            }],
-            vec![],
-        );
-
-        assert!(decide(&input).actions.is_empty());
+        snapshot.in_combat = true;
+        snapshot.ai_state_data.critter_escape_ms = 0;
+        let input = make_input(snapshot, vec![]);
+        assert!(has_action(&decide(&input).actions, |a| matches!(
+            a,
+            AIAction::EnterEvadeMode
+        )));
     }
 
-    // ========== decide_basic integration test ==========
-
     #[test]
-    fn test_decide_basic_enters_combat_on_aggro() {
-        let target = player_guid(10);
-        let events = vec![AIEvent::UnitInRange {
-            unit_guid: target,
-            distance: 15.0,
-            is_hostile: true,
-            is_player: true,
-        }];
-        let input = make_input(make_snapshot(AIState::Idle), events, vec![]);
-
-        let result = decide_basic(&input);
-
-        assert!(has_action(&result.actions, |a| matches!(
-            a,
-            AIAction::EnterCombat { .. }
-        )));
-        assert!(has_action(&result.actions, |a| matches!(
-            a,
-            AIAction::SetAttackTarget { .. }
-        )));
+    fn null_ai_never_answers_attacks() {
+        let mut snapshot = make_snapshot(AIState::Idle);
+        snapshot.ai_type = AIType::Null;
+        let input = make_input(
+            snapshot,
+            vec![AIEvent::AttackedBy {
+                attacker_guid: player_guid(10),
+            }],
+        );
+        assert!(decide(&input).actions.is_empty());
     }
 }

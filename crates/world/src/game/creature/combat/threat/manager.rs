@@ -28,6 +28,25 @@ pub struct HostileReference {
     pub suppressed: bool,
 }
 
+/// How a candidate looks to victim selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VictimCheck {
+    /// Attackable; `in_melee` says whether the creature can already hit it.
+    Valid { in_melee: bool },
+    /// Not attackable right now (skipped, stays on the list).
+    Invalid,
+    /// The fight has moved outside the creature's threat area.
+    OutOfThreatArea,
+}
+
+/// Outcome of victim selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VictimSelection {
+    Victim(ObjectGuid),
+    None,
+    OutOfThreatArea,
+}
+
 /// Manages threat list for a creature
 #[derive(Debug, Clone)]
 pub struct ThreatManager {
@@ -67,7 +86,6 @@ impl ThreatManager {
 
         if threat > 0.0 {
             self.container.add_threat(source, threat);
-            self.update_victim();
         }
     }
 
@@ -86,16 +104,96 @@ impl ThreatManager {
 
         if threat > 0.0 {
             self.container.add_threat(healer, threat);
-            self.update_victim();
         }
     }
 
-    /// Add raw threat (for spell effects, taunt, etc.)
+    /// Add raw threat (for spell effects, taunt, etc.). Zero threat still puts the
+    /// target on the list, which is how a pull or a missed swing starts a fight.
     pub fn add_threat(&mut self, target: ObjectGuid, amount: f32) {
-        if target != self.owner && amount > 0.0 {
+        if target != self.owner && amount >= 0.0 {
             self.container.add_threat(target, amount);
-            self.update_victim();
         }
+    }
+
+    /// Change a target's threat by a signed amount, never below zero.
+    pub fn modify_threat(&mut self, target: ObjectGuid, delta: f32) {
+        let current = self.container.get_threat(target);
+        self.container.set_threat(target, (current + delta).max(0.0));
+    }
+
+    /// Scale a target's threat by `percent` (-100 wipes it).
+    pub fn modify_threat_percent(&mut self, target: ObjectGuid, percent: i32) {
+        let current = self.container.get_threat(target);
+        let scaled = current + current * percent as f32 / 100.0;
+        self.container.set_threat(target, scaled.max(0.0));
+    }
+
+    /// Pick the creature's victim from the online list, best threat first.
+    ///
+    /// `check` classifies each candidate. A candidate outside the threat area ends
+    /// the search: the creature should evade. A current victim keeps its place
+    /// unless another candidate has more than 110% of its threat while in melee
+    /// range, or more than 130% anywhere.
+    pub fn select_next_victim(
+        &mut self,
+        mut check: impl FnMut(ObjectGuid) -> VictimCheck,
+    ) -> VictimSelection {
+        let candidates = self.container.sorted_online();
+        let mut current = self
+            .current_victim
+            .filter(|victim| candidates.iter().any(|(guid, _)| guid == victim));
+        let current_threat = |current: Option<ObjectGuid>| {
+            current
+                .map(|victim| self.container.get_effective_threat(victim))
+                .unwrap_or(0.0)
+        };
+
+        let mut selected = None;
+        for (target, threat) in candidates {
+            let in_melee = match check(target) {
+                VictimCheck::OutOfThreatArea => {
+                    self.current_victim = None;
+                    return VictimSelection::OutOfThreatArea;
+                }
+                VictimCheck::Invalid => {
+                    if current == Some(target) {
+                        current = None;
+                    }
+                    continue;
+                }
+                VictimCheck::Valid { in_melee } => in_melee,
+            };
+
+            let Some(victim) = current else {
+                selected = Some(target);
+                break;
+            };
+            let victim_threat = current_threat(current);
+            if victim == target || threat <= 1.1 * victim_threat {
+                selected = Some(victim);
+                break;
+            }
+            if threat > 1.3 * victim_threat || in_melee {
+                selected = Some(target);
+                break;
+            }
+        }
+
+        self.current_victim = selected;
+        match selected {
+            Some(victim) => VictimSelection::Victim(victim),
+            None => VictimSelection::None,
+        }
+    }
+
+    /// Targets on the online list.
+    pub fn online_targets(&self) -> Vec<ObjectGuid> {
+        self.container.online_targets()
+    }
+
+    /// Whether any target is on the online list.
+    pub fn has_online_targets(&self) -> bool {
+        !self.container.online_targets().is_empty()
     }
 
     /// Apply taunt effect (temporary threat modifier)
@@ -250,43 +348,86 @@ mod tests {
         assert_eq!(manager.get_threat(attacker), 150.0);
     }
 
-    #[test]
-    fn test_target_switch_threshold() {
-        let owner = ObjectGuid::new_creature(1, 1);
-        let mut manager = ThreatManager::new(owner);
-        let attacker1 = ObjectGuid::new_player(1);
-        let attacker2 = ObjectGuid::new_player(2);
-
-        // First attacker becomes victim
-        manager.add_damage_threat(attacker1, 100, 1.0);
-        assert_eq!(manager.get_victim(), Some(attacker1));
-
-        // Second attacker needs 110% threat to pull aggro (melee)
-        manager.add_damage_threat(attacker2, 105, 1.0); // 105 < 110
-        assert_eq!(manager.get_victim(), Some(attacker1)); // Still attacker1
-
-        manager.add_damage_threat(attacker2, 10, 1.0); // 115 > 110
-        assert_eq!(manager.get_victim(), Some(attacker2)); // Now attacker2
+    fn select(manager: &mut ThreatManager, in_melee: bool) -> Option<ObjectGuid> {
+        match manager.select_next_victim(|_| VictimCheck::Valid { in_melee }) {
+            VictimSelection::Victim(victim) => Some(victim),
+            _ => None,
+        }
     }
 
     #[test]
-    fn test_ranged_threshold() {
+    fn melee_range_challenger_needs_110_percent() {
         let owner = ObjectGuid::new_creature(1, 1);
         let mut manager = ThreatManager::new(owner);
-        manager.set_ranged_attacker(true);
-
         let attacker1 = ObjectGuid::new_player(1);
         let attacker2 = ObjectGuid::new_player(2);
 
         manager.add_damage_threat(attacker1, 100, 1.0);
-        assert_eq!(manager.get_victim(), Some(attacker1));
+        assert_eq!(select(&mut manager, true), Some(attacker1));
 
-        // Ranged needs 130% threat
+        manager.add_damage_threat(attacker2, 105, 1.0); // 105 < 110
+        assert_eq!(select(&mut manager, true), Some(attacker1));
+
+        manager.add_damage_threat(attacker2, 10, 1.0); // 115 > 110
+        assert_eq!(select(&mut manager, true), Some(attacker2));
+    }
+
+    #[test]
+    fn ranged_challenger_needs_130_percent() {
+        let owner = ObjectGuid::new_creature(1, 1);
+        let mut manager = ThreatManager::new(owner);
+        let attacker1 = ObjectGuid::new_player(1);
+        let attacker2 = ObjectGuid::new_player(2);
+
+        manager.add_damage_threat(attacker1, 100, 1.0);
+        assert_eq!(select(&mut manager, false), Some(attacker1));
+
         manager.add_damage_threat(attacker2, 120, 1.0); // 120 < 130
-        assert_eq!(manager.get_victim(), Some(attacker1));
+        assert_eq!(select(&mut manager, false), Some(attacker1));
 
         manager.add_damage_threat(attacker2, 15, 1.0); // 135 > 130
-        assert_eq!(manager.get_victim(), Some(attacker2));
+        assert_eq!(select(&mut manager, false), Some(attacker2));
+    }
+
+    #[test]
+    fn invalid_victim_falls_through_to_the_next_target() {
+        let owner = ObjectGuid::new_creature(1, 1);
+        let mut manager = ThreatManager::new(owner);
+        let tank = ObjectGuid::new_player(1);
+        let healer = ObjectGuid::new_player(2);
+        manager.add_damage_threat(tank, 1000, 1.0);
+        manager.add_damage_threat(healer, 10, 1.0);
+        assert_eq!(select(&mut manager, true), Some(tank));
+
+        let selection = manager.select_next_victim(|target| {
+            if target == tank {
+                VictimCheck::Invalid
+            } else {
+                VictimCheck::Valid { in_melee: true }
+            }
+        });
+        assert_eq!(selection, VictimSelection::Victim(healer));
+    }
+
+    #[test]
+    fn out_of_threat_area_stops_selection() {
+        let owner = ObjectGuid::new_creature(1, 1);
+        let mut manager = ThreatManager::new(owner);
+        manager.add_threat(ObjectGuid::new_player(1), 0.0);
+        assert_eq!(
+            manager.select_next_victim(|_| VictimCheck::OutOfThreatArea),
+            VictimSelection::OutOfThreatArea
+        );
+        assert_eq!(manager.get_victim(), None);
+    }
+
+    #[test]
+    fn zero_threat_puts_a_target_on_the_list() {
+        let owner = ObjectGuid::new_creature(1, 1);
+        let mut manager = ThreatManager::new(owner);
+        let puller = ObjectGuid::new_player(1);
+        manager.add_threat(puller, 0.0);
+        assert_eq!(select(&mut manager, true), Some(puller));
     }
 
     #[test]
@@ -296,17 +437,14 @@ mod tests {
         let attacker1 = ObjectGuid::new_player(1);
         let attacker2 = ObjectGuid::new_player(2);
 
-        // Attacker1 has high threat
         manager.add_damage_threat(attacker1, 1000, 1.0);
-        assert_eq!(manager.get_victim(), Some(attacker1));
+        assert_eq!(select(&mut manager, false), Some(attacker1));
 
-        // Attacker2 taunts (even with 0 threat)
         manager.taunt(attacker2, 0, 3000);
-        assert_eq!(manager.get_victim(), Some(attacker2));
+        assert_eq!(select(&mut manager, false), Some(attacker2));
 
-        // After taunt expires, should return to attacker1
         manager.update(3001);
-        assert_eq!(manager.get_victim(), Some(attacker1));
+        assert_eq!(select(&mut manager, false), Some(attacker1));
     }
 
     #[test]

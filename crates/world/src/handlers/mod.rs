@@ -25,6 +25,7 @@ pub mod item;
 pub mod loot;
 pub mod mail;
 pub mod movement;
+pub mod pet_action;
 pub mod player_handler;
 pub mod query;
 pub mod quest_handler;
@@ -806,6 +807,9 @@ pub async fn dispatch_packet(
                 }
                 Opcode::CMSG_PET_CANCEL_AURA => {
                     spells::handle_pet_cancel_aura(session, packet, world).await?;
+                }
+                Opcode::CMSG_PET_ACTION => {
+                    pet_action::handle_pet_action(session, packet, world).await?;
                 }
                 Opcode::CMSG_CANCEL_GROWTH_AURA => {
                     spells::handle_cancel_growth_aura(session, packet, world).await?;

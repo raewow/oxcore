@@ -131,6 +131,22 @@ impl WaypointMovementGenerator {
         false
     }
 
+    /// Point id of the waypoint being walked to (the one a finished spline reached).
+    pub fn current_point_id(&self) -> u32 {
+        self.waypoints
+            .get(self.current_index)
+            .map(|w| w.point_id)
+            .unwrap_or(0)
+    }
+
+    /// Movement script of the waypoint being walked to.
+    pub fn current_script_id(&self) -> u32 {
+        self.waypoints
+            .get(self.current_index)
+            .map(|w| w.script_id)
+            .unwrap_or(0)
+    }
+
     pub fn get_last_reached_waypoint(&self) -> u32 {
         self.last_reached_waypoint
     }

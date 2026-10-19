@@ -8,9 +8,8 @@ use tracing::{debug, info, warn};
 use crate::core::common::packet::WorldPacketGuidExt;
 use crate::core::lua::{build_player_snapshot, execute_gossip_actions};
 use crate::core::session::WorldSession;
-use crate::game::common::player_constants::get_faction_for_race;
 use crate::game::creature::ai::{
-    is_hostile_faction, is_npc, NPC_FLAG_GOSSIP, NPC_FLAG_QUEST_GIVER, NPC_FLAG_VENDOR,
+    is_npc, NPC_FLAG_GOSSIP, NPC_FLAG_QUEST_GIVER, NPC_FLAG_VENDOR,
 };
 use crate::game::npc::quest::system::QUEST_SHARE_DISTANCE;
 use crate::game::npc::quest::types::{QuestStatus, MAX_QUEST_LOG_SIZE};
@@ -51,9 +50,14 @@ pub async fn handle_questgiver_status_query(
             .managers
             .creature_mgr
             .get_creature(quest_giver_guid)
-            .and_then(|c| {
+            .map(|c| c.faction)
+            .and_then(|faction| {
                 world.managers.player_mgr.with_player(player_guid, |p| {
-                    is_hostile_faction(c.faction, get_faction_for_race(p.race), true)
+                    crate::game::faction::creature_is_hostile_to_player(
+                        &world.dbc.read(),
+                        faction,
+                        p,
+                    )
                 })
             })
             .unwrap_or(false);
@@ -114,24 +118,30 @@ pub async fn handle_questgiver_status_multiple_query(
         })
         .unwrap_or_default();
 
-    let player_faction = world
-        .managers
-        .player_mgr
-        .with_player(player_guid, |p| get_faction_for_race(p.race));
-
     let mut statuses = Vec::new();
     for guid in visible {
         // A hostile questgiver shows nothing, matching the single-GUID query above. Leaving it out
         // entirely would be wrong: the client repaints from this list, so an omitted NPC keeps its
         // stale marker rather than losing it.
         let hostile = guid.is_creature()
-            && player_faction.is_some_and(|faction| {
-                world
-                    .managers
-                    .creature_mgr
-                    .get_creature(guid)
-                    .is_some_and(|c| is_hostile_faction(c.faction, faction, true))
-            });
+            && world
+                .managers
+                .creature_mgr
+                .get_creature(guid)
+                .map(|c| c.faction)
+                .is_some_and(|faction| {
+                    world
+                        .managers
+                        .player_mgr
+                        .with_player(player_guid, |p| {
+                            crate::game::faction::creature_is_hostile_to_player(
+                                &world.dbc.read(),
+                                faction,
+                                p,
+                            )
+                        })
+                        .unwrap_or(false)
+                });
 
         let status = if hostile {
             QuestGiverDialogStatus::None
@@ -1258,6 +1268,7 @@ mod tests {
             loot_id: 0,
             pickpocket_loot_id: 0,
             skinning_loot_id: 0,
+            ai: Default::default(),
         };
 
         world.managers.creature_mgr.add_template(template.clone());
@@ -1510,6 +1521,7 @@ mod tests {
             loot_id: 0,
             pickpocket_loot_id: 0,
             skinning_loot_id: 0,
+            ai: Default::default(),
         };
 
         world.managers.creature_mgr.add_template(template.clone());

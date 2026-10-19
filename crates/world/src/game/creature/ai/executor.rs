@@ -3,7 +3,7 @@
 //! This module executes the actions produced by AI decision functions.
 //! Actions are applied in order with proper locking to maintain consistency.
 
-use super::types::{AIAction, AIState, AIType};
+use super::types::{AIAction, AIState, MovementType, ReactState};
 use crate::game::broadcast_mgr::broadcast_around_creature;
 use crate::game::creature::movement::MovementGeneratorType;
 use crate::World;
@@ -34,14 +34,7 @@ pub fn execute_actions(world: &World, creature_guid: ObjectGuid, actions: Vec<AI
 
 fn execute_single_action(world: &World, creature_guid: ObjectGuid, action: AIAction) {
     match action {
-        AIAction::SetAttackTarget { target_guid } => {
-            world
-                .managers
-                .creature_mgr
-                .with_creature_mut(creature_guid, |creature| {
-                    creature.combat.attacking = Some(target_guid);
-                });
-        }
+        AIAction::SetAttackTarget { target_guid } => switch_target(world, creature_guid, target_guid),
 
         AIAction::ClearAttackTarget => {
             world
@@ -64,115 +57,70 @@ fn execute_single_action(world: &World, creature_guid: ObjectGuid, action: AIAct
             target_guid,
             min_distance: _,
         } => {
-            // Phase 8: Start chasing the target
-            let current_pos = world
-                .managers
-                .creature_mgr
-                .get_position(creature_guid)
-                .unwrap_or_default();
-
             world
                 .managers
                 .creature_mgr
                 .with_creature_mut(creature_guid, |creature| {
+                    let position = creature.position;
                     let combat_reach = creature.combat_reach;
                     let run_speed = creature.run_speed();
                     creature.motion_master.chase(
                         target_guid,
                         creature_guid,
-                        current_pos,
+                        position,
                         combat_reach,
                         run_speed,
                     );
                 });
-
-            tracing::debug!(
-                "[AI] Creature {:?} started chasing {:?}",
-                creature_guid,
-                target_guid
-            );
         }
 
         AIAction::MoveTo {
             position,
             movement_type,
         } => {
-            // Movement comes in Phase 8
-            tracing::debug!(
-                "[AI] Creature {:?} wants to move to {:?} ({:?})",
-                creature_guid,
-                position,
-                movement_type
-            );
+            world
+                .managers
+                .creature_mgr
+                .with_creature_mut(creature_guid, |creature| {
+                    let current = creature.position;
+                    let walk = movement_type == MovementType::Walk;
+                    let speed = if walk {
+                        creature.walk_speed()
+                    } else {
+                        creature.run_speed()
+                    };
+                    creature.motion_master.move_point(
+                        0,
+                        position,
+                        u32::from(walk),
+                        speed,
+                        position.o,
+                        creature_guid,
+                        current,
+                    );
+                });
         }
 
         AIAction::ReturnToSpawn => {
-            // Phase 8: Start returning home
-            let current_pos = world
-                .managers
-                .creature_mgr
-                .get_position(creature_guid)
-                .unwrap_or_default();
-
             world
                 .managers
                 .creature_mgr
                 .with_creature_mut(creature_guid, |creature| {
-                    let home = creature.home_position;
-                    let run_speed = creature.run_speed();
-                    creature
-                        .motion_master
-                        .return_home(home, creature_guid, current_pos, run_speed);
+                    if creature.motion_master.active_generator() != MovementGeneratorType::Home {
+                        let position = creature.position;
+                        let home = creature.home_position;
+                        let run_speed = creature.run_speed();
+                        creature
+                            .motion_master
+                            .return_home(home, creature_guid, position, run_speed);
+                    }
                     creature.ai_state = AIState::Returning;
                 });
-
-            tracing::debug!("[AI] Creature {:?} returning to spawn", creature_guid);
         }
 
-        AIAction::EnterEvadeMode => {
-            // Phase 8: Stop movement and return home on evade
-            let current_pos = world
-                .managers
-                .creature_mgr
-                .get_position(creature_guid)
-                .unwrap_or_default();
+        AIAction::ReachedHome => reached_home(world, creature_guid),
 
-            world
-                .managers
-                .creature_mgr
-                .with_creature_mut(creature_guid, |creature| {
-                    creature.move_spline.stop();
-                    let home = creature.home_position;
-                    let run_speed = creature.run_speed();
-                    creature
-                        .motion_master
-                        .return_home(home, creature_guid, current_pos, run_speed);
-                    creature.ai_state = AIState::Evading;
-                    creature.combat.leave_combat();
-                    creature.threat_manager.clear();
-                    // An evading creature is untapped again.
-                    creature.loot_recipient = None;
-                    // Heal to full on evade
-                    creature.current_health = creature.max_health;
-                    creature.current_mana = creature.max_mana;
-                    // Clear combat flags
-                    creature.unit_flags &= !crate::game::common::unit_flags::IN_COMBAT;
-                });
-
-            // Send health update to nearby players
-            send_health_update(world, creature_guid);
-
-            // Send VALUES update clearing combat flags and target
-            send_combat_exit_update(world, creature_guid);
-
-            crate::game::instance::scripts::queue_creature_combat_event(
-                world,
-                creature_guid,
-                crate::game::instance::scripts::CreatureCombatEvent::Evade,
-            );
-
-            tracing::debug!("[AI] Creature {:?} entering evade mode", creature_guid);
-        }
+        AIAction::EnterEvadeMode => enter_evade_mode(world, creature_guid),
 
         AIAction::LeaveCombat => {
             world
@@ -181,9 +129,9 @@ fn execute_single_action(world: &World, creature_guid: ObjectGuid, action: AIAct
                 .with_creature_mut(creature_guid, |creature| {
                     creature.ai_state = AIState::Idle;
                     creature.combat.leave_combat();
-                    // Clear threat and combat flags when leaving combat.
                     creature.threat_manager.clear();
                     creature.unit_flags &= !crate::game::common::unit_flags::IN_COMBAT;
+                    creature.ai_state_data.reset_combat();
                     creature
                         .motion_master
                         .clear_type(MovementGeneratorType::Chase, creature_guid);
@@ -191,87 +139,10 @@ fn execute_single_action(world: &World, creature_guid: ObjectGuid, action: AIAct
                         .motion_master
                         .reinitialize_patrol_movement(creature_guid);
                 });
-
-            // Send VALUES update clearing combat flags and target
             send_combat_exit_update(world, creature_guid);
-
-            tracing::debug!("[AI] Creature {:?} leaving combat", creature_guid);
         }
 
-        AIAction::EnterCombat { target_guid } => {
-            // Get current position for stop packet and chase init
-            let current_pos = world
-                .managers
-                .creature_mgr
-                .get_position(creature_guid)
-                .unwrap_or_default();
-
-            let was_already_in_combat = world
-                .managers
-                .creature_mgr
-                .with_creature_mut(creature_guid, |creature| {
-                    let was_combat = creature.ai_state == AIState::Combat;
-                    creature.ai_state = AIState::Combat;
-                    creature.combat.in_combat = true;
-                    creature.combat.attackers.insert(target_guid);
-                    // Set the victim when combat starts. Without it
-                    // the creature has no attack target to swing at, and UNIT_FIELD_TARGET
-                    // stays empty for clients that see it enter combat.
-                    if creature.combat.attacking.is_none() {
-                        creature.combat.attacking = Some(target_guid);
-                    }
-                    creature.unit_flags |= crate::game::common::unit_flags::IN_COMBAT;
-
-                    // Stop any active movement (wander spline, etc.) immediately
-                    creature.move_spline.stop();
-                    // Start chase right away instead of waiting for next AI tick
-                    let combat_reach = creature.combat_reach;
-                    let run_speed = creature.run_speed();
-                    creature.motion_master.chase(
-                        target_guid,
-                        creature_guid,
-                        current_pos,
-                        combat_reach,
-                        run_speed,
-                    );
-                    was_combat
-                })
-                .unwrap_or(true);
-
-            // Send stop packet so client stops showing old wander movement
-            world
-                .systems
-                .creature_movement
-                .send_stop_packet(creature_guid, current_pos, world);
-
-            // Send SMSG_ATTACKSTART to notify nearby players
-            send_attack_start(world, creature_guid, target_guid);
-
-            // Send VALUES update with IN_COMBAT flag and UNIT_FIELD_TARGET
-            send_combat_state_update(world, creature_guid, target_guid);
-
-            // Queue CombatStarted event so Lua OnEnterCombat callback fires next tick
-            if !was_already_in_combat {
-                super::system::queue_event(
-                    world,
-                    creature_guid,
-                    super::types::AIEvent::CombatStarted {
-                        initial_aggressor: target_guid,
-                    },
-                );
-                crate::game::instance::scripts::queue_creature_combat_event(
-                    world,
-                    creature_guid,
-                    crate::game::instance::scripts::CreatureCombatEvent::EnterCombat,
-                );
-            }
-
-            tracing::debug!(
-                "[AI] Creature {:?} entering combat with {:?}",
-                creature_guid,
-                target_guid
-            );
-        }
+        AIAction::EnterCombat { target_guid } => attack_start(world, creature_guid, target_guid),
 
         AIAction::StopMovement => {
             let current_pos = world
@@ -279,7 +150,6 @@ fn execute_single_action(world: &World, creature_guid: ObjectGuid, action: AIAct
                 .creature_mgr
                 .get_position(creature_guid)
                 .unwrap_or_default();
-
             world
                 .managers
                 .creature_mgr
@@ -287,13 +157,10 @@ fn execute_single_action(world: &World, creature_guid: ObjectGuid, action: AIAct
                     creature.motion_master.stop(creature_guid);
                     creature.move_spline.stop();
                 });
-
-            // Send stop packet to client so it also stops the creature
             world
                 .systems
                 .creature_movement
                 .send_stop_packet(creature_guid, current_pos, world);
-            tracing::debug!("[AI] Creature {:?} stopping movement", creature_guid);
         }
 
         AIAction::FleeFrom {
@@ -301,77 +168,36 @@ fn execute_single_action(world: &World, creature_guid: ObjectGuid, action: AIAct
             distance,
             duration_ms,
         } => {
-            let current_pos = world
-                .managers
-                .creature_mgr
-                .get_position(creature_guid)
-                .unwrap_or_default();
-
             world
                 .managers
                 .creature_mgr
                 .with_creature_mut(creature_guid, |creature| {
+                    let position = creature.position;
+                    let run_speed = creature.run_speed();
                     creature.ai_state = AIState::Fleeing;
                     creature.motion_master.fear(
                         flee_from_guid,
                         duration_ms,
                         distance,
                         creature_guid,
-                        current_pos,
-                        creature.run_speed(),
+                        position,
+                        run_speed,
                     );
                 });
-            tracing::debug!(
-                "[AI] Creature {:?} fleeing from {:?} for {} yards, {} ms",
-                creature_guid,
-                flee_from_guid,
-                distance,
-                duration_ms
-            );
         }
 
-        AIAction::FaceTarget { target_guid } => {
-            // Get creature and target positions to calculate facing angle
-            let creature_pos = world
-                .managers
-                .creature_mgr
-                .get_position(creature_guid)
-                .unwrap_or_default();
-
-            let target_pos = if target_guid.is_player() {
-                world.managers.player_mgr.get_player_position(target_guid)
-            } else {
-                world.managers.creature_mgr.get_position(target_guid)
-            };
-
-            if let Some(target_pos) = target_pos {
-                let angle = (target_pos.y - creature_pos.y).atan2(target_pos.x - creature_pos.x);
-
-                // Update creature orientation
-                world
-                    .managers
-                    .creature_mgr
-                    .with_creature_mut(creature_guid, |creature| {
-                        creature.position.o = angle;
-                    });
-
-                // Send facing packet to nearby players
-                world.systems.creature_movement.send_facing_packet(
-                    creature_guid,
-                    creature_pos,
-                    angle,
-                    world,
-                );
-            }
-        }
+        AIAction::FaceTarget { target_guid } => face_target(world, creature_guid, target_guid),
 
         AIAction::RandomMovement { wander_distance } => {
-            // Movement comes in Phase 8
-            tracing::debug!(
-                "[AI] Creature {:?} random movement (max {} yards)",
-                creature_guid,
-                wander_distance
-            );
+            world
+                .managers
+                .creature_mgr
+                .with_creature_mut(creature_guid, |creature| {
+                    creature.wander_distance = wander_distance;
+                    creature
+                        .motion_master
+                        .reinitialize_patrol_movement(creature_guid);
+                });
         }
 
         AIAction::CastSpell {
@@ -391,12 +217,15 @@ fn execute_single_action(world: &World, creature_guid: ObjectGuid, action: AIAct
                 .managers
                 .creature_mgr
                 .with_creature_mut(creature_guid, |creature| {
-                    // Use ThreatManager for Phase 5 threat handling
                     creature.threat_manager.add_threat(target_guid, amount);
-
-                    // Also update legacy combat threat for backward compatibility
                     creature.combat.add_threat(target_guid, amount, 0);
+                    if creature.ai_state == AIState::Combat {
+                        creature.combat.attackers.insert(target_guid);
+                    }
                 });
+            if amount == 0.0 {
+                put_in_combat_with(world, target_guid, creature_guid);
+            }
         }
 
         AIAction::ModifyThreat {
@@ -408,32 +237,18 @@ fn execute_single_action(world: &World, creature_guid: ObjectGuid, action: AIAct
                 .managers
                 .creature_mgr
                 .with_creature_mut(creature_guid, |creature| {
-                    // Get current threat from ThreatManager
-                    let current_threat = creature.threat_manager.get_threat(target_guid);
-                    let new_threat = if is_percent {
-                        current_threat * amount
-                    } else {
-                        amount
-                    };
-
-                    // Calculate delta and add it
-                    let delta = new_threat - current_threat;
-                    if delta != 0.0 {
-                        creature.threat_manager.add_threat(target_guid, delta);
-                    }
-
-                    // Also update legacy combat threat
+                    let current = creature.threat_manager.get_threat(target_guid);
+                    let new_threat = if is_percent { current * amount } else { amount };
+                    creature
+                        .threat_manager
+                        .modify_threat(target_guid, new_threat - current);
                     if let Some(entry) = creature
                         .combat
                         .threat_list
                         .iter_mut()
                         .find(|e| e.guid == target_guid)
                     {
-                        if is_percent {
-                            entry.threat *= amount;
-                        } else {
-                            entry.threat = amount;
-                        }
+                        entry.threat = new_threat.max(0.0);
                     }
                 });
         }
@@ -448,67 +263,61 @@ fn execute_single_action(world: &World, creature_guid: ObjectGuid, action: AIAct
                 });
         }
 
-        AIAction::SetMeleeAttack { enabled } => {
-            tracing::debug!(
-                "[AI] Creature {:?} melee attack {}",
-                creature_guid,
-                if enabled { "enabled" } else { "disabled" }
-            );
-        }
+        AIAction::SetMeleeAttack { enabled } => set_melee_attack(world, creature_guid, enabled),
 
         AIAction::SetCombatMovement { enabled } => {
-            tracing::debug!(
-                "[AI] Creature {:?} combat movement {}",
-                creature_guid,
-                if enabled { "enabled" } else { "disabled" }
-            );
+            set_combat_movement(world, creature_guid, enabled)
         }
 
         AIAction::SetReactState { react_state } => {
-            tracing::debug!(
-                "[AI] Creature {:?} react state set to {:?}",
-                creature_guid,
-                react_state
-            );
+            world
+                .managers
+                .creature_mgr
+                .with_creature_mut(creature_guid, |creature| {
+                    creature.ai_state_data.react_state = react_state;
+                });
         }
 
         AIAction::CallForHelp { radius } => {
-            tracing::debug!(
-                "[AI] Creature {:?} calling for help ({} yards)",
-                creature_guid,
-                radius
-            );
-            // TODO: Implement call for help - notify nearby creatures
+            super::assist::call_for_help(world, creature_guid, radius);
         }
 
         AIAction::SummonGuards { guard_entry, count } => {
-            tracing::debug!(
-                "[AI] Creature {:?} summoning {} guards (entry {})",
-                creature_guid,
-                count,
-                guard_entry
-            );
-            // TODO: Implement guard summoning
+            let Some((map_id, instance_id, position)) = world
+                .managers
+                .creature_mgr
+                .with_creature(creature_guid, |c| (c.map_id, c.instance_id, c.position))
+            else {
+                return;
+            };
+            for _ in 0..count {
+                crate::game::creature::summon::summon_creature(
+                    world,
+                    Some(creature_guid),
+                    guard_entry,
+                    map_id,
+                    instance_id,
+                    position,
+                    crate::game::creature::summon::SummonDespawn::TimedOutOfCombat,
+                    60_000,
+                );
+            }
         }
 
         AIAction::Say { text } => {
             send_creature_chat(world, creature_guid, 0x0B, &text); // CHAT_MSG_MONSTER_SAY
-            tracing::debug!("[AI] Creature {:?} says: {}", creature_guid, text);
         }
 
         AIAction::Yell { text } => {
             send_creature_chat(world, creature_guid, 0x0C, &text); // CHAT_MSG_MONSTER_YELL
-            tracing::debug!("[AI] Creature {:?} yells: {}", creature_guid, text);
         }
 
         AIAction::PlayEmote { emote_id } => {
             send_creature_emote(world, creature_guid, emote_id);
-            tracing::debug!("[AI] Creature {:?} plays emote {}", creature_guid, emote_id);
         }
 
         AIAction::TextEmote { text } => {
             send_creature_chat(world, creature_guid, 0x0D, &text); // CHAT_MSG_MONSTER_EMOTE
-            tracing::debug!("[AI] Creature {:?} text emote: {}", creature_guid, text);
         }
 
         AIAction::PlaySound {
@@ -516,12 +325,11 @@ fn execute_single_action(world: &World, creature_guid: ObjectGuid, action: AIAct
             zone_wide: _,
         } => {
             send_creature_sound(world, creature_guid, sound_id);
-            tracing::debug!("[AI] Creature {:?} plays sound {}", creature_guid, sound_id);
         }
 
         AIAction::InterruptSpell => {
-            // TODO: Clear casting state when creature cast-time spells are implemented
-            tracing::debug!("[AI] Creature {:?} interrupted spell", creature_guid);
+            // Creature casts complete instantly (spell review F34); there is no
+            // cast in progress to interrupt.
         }
 
         AIAction::KillSelf => {
@@ -535,7 +343,6 @@ fn execute_single_action(world: &World, creature_guid: ObjectGuid, action: AIAct
                 creature_guid,
                 timestamp,
             );
-            tracing::debug!("[AI] Creature {:?} killed self", creature_guid);
         }
 
         AIAction::SetFaction { faction_id } => {
@@ -545,35 +352,40 @@ fn execute_single_action(world: &World, creature_guid: ObjectGuid, action: AIAct
                 .with_creature_mut(creature_guid, |creature| {
                     creature.faction = faction_id;
                 });
-            tracing::debug!(
-                "[AI] Creature {:?} faction set to {}",
+            send_unit_field(
+                world,
                 creature_guid,
-                faction_id
+                crate::game::common::update_fields::UNIT_FIELD_FACTIONTEMPLATE,
+                faction_id,
             );
         }
 
         AIAction::SetImmune { physical, spell } => {
-            world
+            use crate::game::common::unit_flags::{IMMUNE_TO_NPC, IMMUNE_TO_PLAYER};
+            let flags = world
                 .managers
                 .creature_mgr
                 .with_creature_mut(creature_guid, |creature| {
                     if physical {
-                        creature.unit_flags |= 0x00000100; // UNIT_FLAG_IMMUNE_TO_PC (physical approx)
+                        creature.unit_flags |= IMMUNE_TO_PLAYER;
                     } else {
-                        creature.unit_flags &= !0x00000100;
+                        creature.unit_flags &= !IMMUNE_TO_PLAYER;
                     }
                     if spell {
-                        creature.unit_flags |= 0x00000200; // UNIT_FLAG_IMMUNE_TO_NPC (spell approx)
+                        creature.unit_flags |= IMMUNE_TO_NPC;
                     } else {
-                        creature.unit_flags &= !0x00000200;
+                        creature.unit_flags &= !IMMUNE_TO_NPC;
                     }
+                    creature.unit_flags
                 });
-            tracing::debug!(
-                "[AI] Creature {:?} immune set: phys={}, spell={}",
-                creature_guid,
-                physical,
-                spell
-            );
+            if let Some(flags) = flags {
+                send_unit_field(
+                    world,
+                    creature_guid,
+                    crate::game::common::update_fields::UNIT_FIELD_FLAGS,
+                    flags,
+                );
+            }
         }
 
         AIAction::SetRoot { rooted } => {
@@ -583,9 +395,14 @@ fn execute_single_action(world: &World, creature_guid: ObjectGuid, action: AIAct
                 .with_creature_mut(creature_guid, |creature| {
                     if rooted {
                         creature.move_spline.stop();
+                        creature.motion_master.move_idle(creature_guid);
+                        creature.ai_state_data.combat_movement_enabled = false;
+                    } else {
+                        creature.ai_state_data.combat_movement_enabled = creature.static_flags1
+                            & crate::game::common::creature_flags::CREATURE_STATIC_FLAG_SESSILE
+                            == 0;
                     }
                 });
-            tracing::debug!("[AI] Creature {:?} root={}", creature_guid, rooted);
         }
 
         AIAction::SetHealthPercent { percent } => {
@@ -597,11 +414,6 @@ fn execute_single_action(world: &World, creature_guid: ObjectGuid, action: AIAct
                         ((creature.max_health as f32) * percent.clamp(0.0, 1.0)) as u32;
                 });
             send_health_update(world, creature_guid);
-            tracing::debug!(
-                "[AI] Creature {:?} health set to {}%",
-                creature_guid,
-                (percent * 100.0) as u32
-            );
         }
 
         AIAction::Morph { display_id } => {
@@ -612,11 +424,6 @@ fn execute_single_action(world: &World, creature_guid: ObjectGuid, action: AIAct
                     creature.display_id = display_id;
                 });
             send_display_update(world, creature_guid, display_id);
-            tracing::debug!(
-                "[AI] Creature {:?} morphed to display {}",
-                creature_guid,
-                display_id
-            );
         }
 
         AIAction::Demorph => {
@@ -631,36 +438,58 @@ fn execute_single_action(world: &World, creature_guid: ObjectGuid, action: AIAct
             if let Some(display_id) = native_display {
                 send_display_update(world, creature_guid, display_id);
             }
-            tracing::debug!("[AI] Creature {:?} demorphed", creature_guid);
         }
 
         AIAction::SpawnCreature {
             entry,
             position,
-            summon_type: _,
-            duration_ms: _,
+            summon_type,
+            duration_ms,
         } => {
-            // Spawn creature at position - uses creature manager
-            tracing::debug!(
-                "[AI] Creature {:?} spawning creature entry {} at ({}, {}, {})",
-                creature_guid,
+            let Some((map_id, instance_id)) = world
+                .managers
+                .creature_mgr
+                .with_creature(creature_guid, |c| (c.map_id, c.instance_id))
+            else {
+                return;
+            };
+            crate::game::creature::summon::summon_creature(
+                world,
+                Some(creature_guid),
                 entry,
-                position.x,
-                position.y,
-                position.z
+                map_id,
+                instance_id,
+                position,
+                crate::game::creature::summon::SummonDespawn::from_script_code(summon_type),
+                duration_ms,
             );
-            // TODO: Full spawn implementation - create creature from template, add to world
-            // For now this is a stub that logs the intent
         }
 
         AIAction::DespawnCreature { guid } => {
-            tracing::debug!("[AI] Despawning creature {:?}", guid);
-            // TODO: Remove creature from world
+            crate::game::creature::summon::despawn_creature(world, guid);
         }
 
         AIAction::DespawnCreaturesByEntry { entry } => {
-            tracing::debug!("[AI] Despawning all creatures with entry {}", entry);
-            // TODO: Find and remove creatures by entry
+            let Some((map_id, instance_id)) = world
+                .managers
+                .creature_mgr
+                .with_creature(creature_guid, |c| (c.map_id, c.instance_id))
+            else {
+                return;
+            };
+            let targets: Vec<ObjectGuid> = world
+                .managers
+                .creature_mgr
+                .iter_creatures()
+                .filter(|e| {
+                    let c = e.value();
+                    c.entry == entry && c.map_id == map_id && c.instance_id == instance_id
+                })
+                .map(|e| *e.key())
+                .collect();
+            for guid in targets {
+                crate::game::creature::summon::despawn_creature(world, guid);
+            }
         }
 
         AIAction::SpawnGameObject {
@@ -668,31 +497,31 @@ fn execute_single_action(world: &World, creature_guid: ObjectGuid, action: AIAct
             position,
             duration_secs,
         } => {
-            tracing::debug!(
-                "[AI] Spawning gameobject entry {} at ({}, {}, {}) for {}s",
+            let Some((map_id, instance_id)) = world
+                .managers
+                .creature_mgr
+                .with_creature(creature_guid, |c| (c.map_id, c.instance_id))
+            else {
+                return;
+            };
+            crate::game::creature::summon::summon_gameobject(
+                world,
                 entry,
-                position.x,
-                position.y,
-                position.z,
-                duration_secs
+                map_id,
+                instance_id,
+                position,
+                duration_secs,
             );
-            // TODO: Full gameobject spawn implementation
         }
 
         AIAction::RespawnGameObject {
             guid,
             duration_secs,
         } => {
-            tracing::debug!(
-                "[AI] Respawning gameobject {:?} for {}s",
-                guid,
-                duration_secs
-            );
-            // TODO: Gameobject respawn implementation
+            crate::game::creature::summon::respawn_gameobject(world, guid, duration_secs);
         }
 
         AIAction::SetInstanceData { data_id, value } => {
-            // Get creature's map/instance info to key the instance state
             if let Some((map_id, instance_id)) = world
                 .managers
                 .creature_mgr
@@ -703,13 +532,6 @@ fn execute_single_action(world: &World, creature_guid: ObjectGuid, action: AIAct
                     .lua_mgr
                     .set_instance_data(map_id, instance_id, data_id, value);
                 crate::game::instance::scripts::queue_save(world, map_id, instance_id);
-                tracing::debug!(
-                    "[AI] Set instance data: {} = {} (map={}, inst={})",
-                    data_id,
-                    value,
-                    map_id,
-                    instance_id
-                );
             }
         }
 
@@ -728,13 +550,6 @@ fn execute_single_action(world: &World, creature_guid: ObjectGuid, action: AIAct
                     .managers
                     .lua_mgr
                     .set_instance_state(map_id, instance_id, state);
-                tracing::debug!(
-                    "[AI] Set instance GUID: {} = {:?} (map={}, inst={})",
-                    data_id,
-                    guid,
-                    map_id,
-                    instance_id
-                );
             }
         }
 
@@ -758,7 +573,6 @@ fn execute_single_action(world: &World, creature_guid: ObjectGuid, action: AIAct
             }
         }
 
-        // ==================== Phase 5: New Actions ====================
         AIAction::RemoveAura { spell_id } => {
             world
                 .managers
@@ -766,31 +580,42 @@ fn execute_single_action(world: &World, creature_guid: ObjectGuid, action: AIAct
                 .with_creature_mut(creature_guid, |creature| {
                     creature.remove_aura(spell_id);
                 });
-            tracing::debug!("[AI] Remove aura {} from {:?}", spell_id, creature_guid);
         }
 
         AIAction::SetUnitFlag { flag } => {
-            world
+            let flags = world
                 .managers
                 .creature_mgr
                 .with_creature_mut(creature_guid, |creature| {
                     creature.unit_flags |= flag;
+                    creature.unit_flags
                 });
-            tracing::debug!("[AI] Set unit flag 0x{:X} on {:?}", flag, creature_guid);
+            if let Some(flags) = flags {
+                send_unit_field(
+                    world,
+                    creature_guid,
+                    crate::game::common::update_fields::UNIT_FIELD_FLAGS,
+                    flags,
+                );
+            }
         }
 
         AIAction::RemoveUnitFlag { flag } => {
-            world
+            let flags = world
                 .managers
                 .creature_mgr
                 .with_creature_mut(creature_guid, |creature| {
                     creature.unit_flags &= !flag;
+                    creature.unit_flags
                 });
-            tracing::debug!(
-                "[AI] Remove unit flag 0x{:X} from {:?}",
-                flag,
-                creature_guid
-            );
+            if let Some(flags) = flags {
+                send_unit_field(
+                    world,
+                    creature_guid,
+                    crate::game::common::update_fields::UNIT_FIELD_FLAGS,
+                    flags,
+                );
+            }
         }
 
         AIAction::SetStandState { state } => {
@@ -800,78 +625,59 @@ fn execute_single_action(world: &World, creature_guid: ObjectGuid, action: AIAct
                 .with_creature_mut(creature_guid, |creature| {
                     creature.stand_state = state;
                 });
-            tracing::debug!("[AI] SetStandState {} on {:?}", state, creature_guid);
+            send_unit_field(
+                world,
+                creature_guid,
+                crate::game::common::update_fields::UNIT_FIELD_BYTES_1,
+                state as u32,
+            );
         }
 
         AIAction::SetDynFlag { flag } => {
-            world
+            let flags = world
                 .managers
                 .creature_mgr
                 .with_creature_mut(creature_guid, |creature| {
                     creature.dynamic_flags |= flag;
+                    creature.dynamic_flags
                 });
-            tracing::debug!("[AI] SetDynFlag 0x{:X} on {:?}", flag, creature_guid);
-        }
-
-        AIAction::RemoveDynFlag { flag } => {
-            world
-                .managers
-                .creature_mgr
-                .with_creature_mut(creature_guid, |creature| {
-                    creature.dynamic_flags &= !flag;
-                });
-            tracing::debug!("[AI] RemoveDynFlag 0x{:X} from {:?}", flag, creature_guid);
-        }
-
-        AIAction::SetCombatWithZone => {
-            // Add all players on the same map to the creature's threat list
-            if let Some(map_id) = world
-                .managers
-                .creature_mgr
-                .with_creature(creature_guid, |c| c.map_id)
-            {
-                // Collect player GUIDs on same map
-                let mut player_guids = Vec::new();
-                world.managers.player_mgr.for_each_player(|guid, player| {
-                    if player.map_id == map_id && player.is_alive() {
-                        player_guids.push(guid);
-                    }
-                });
-
-                for player_guid in &player_guids {
-                    // Add minimal threat so they're on the list
-                    world
-                        .managers
-                        .creature_mgr
-                        .with_creature_mut(creature_guid, |creature| {
-                            creature.threat_manager.add_threat(*player_guid, 1.0);
-                            if !creature.combat.in_combat {
-                                let now = SystemTime::now()
-                                    .duration_since(UNIX_EPOCH)
-                                    .unwrap()
-                                    .as_millis() as u64;
-                                creature.combat.enter_combat(*player_guid, now);
-                            }
-                        });
-                }
-                tracing::debug!(
-                    "[AI] Set combat with zone: {} players engaged on map {}",
-                    player_guids.len(),
-                    map_id
+            if let Some(flags) = flags {
+                send_unit_field(
+                    world,
+                    creature_guid,
+                    crate::game::common::update_fields::UNIT_DYNAMIC_FLAGS,
+                    flags,
                 );
             }
         }
 
-        AIAction::ScriptText { text_id } => {
-            // TODO: Look up text from script_texts DB table by text_id
-            // For now, log it
-            tracing::debug!("[AI] Script text {} for {:?}", text_id, creature_guid);
+        AIAction::RemoveDynFlag { flag } => {
+            let flags = world
+                .managers
+                .creature_mgr
+                .with_creature_mut(creature_guid, |creature| {
+                    creature.dynamic_flags &= !flag;
+                    creature.dynamic_flags
+                });
+            if let Some(flags) = flags {
+                send_unit_field(
+                    world,
+                    creature_guid,
+                    crate::game::common::update_fields::UNIT_DYNAMIC_FLAGS,
+                    flags,
+                );
+            }
         }
 
-        // ==================== Phase 6: Path Movement ====================
+        AIAction::SetCombatWithZone => {
+            super::assist::set_in_combat_with_zone(world, creature_guid, true);
+        }
+
+        AIAction::ScriptText { text_id } => script_text(world, creature_guid, text_id),
+
         AIAction::MoveAlongPath {
             waypoints,
-            movement_type,
+            movement_type: _,
             repeating,
         } => {
             use crate::game::creature::movement::generators::Waypoint;
@@ -902,21 +708,528 @@ fn execute_single_action(world: &World, creature_guid: ObjectGuid, action: AIAct
                         walk_speed,
                     );
                 });
-            tracing::debug!(
-                "[AI] Move along path ({} waypoints, repeating={})",
-                waypoints.len(),
-                repeating
-            );
         }
 
-        AIAction::None => {
-            // Explicit no-op
+        AIAction::ResetCritterEscape => {
+            world
+                .managers
+                .creature_mgr
+                .with_creature_mut(creature_guid, |creature| {
+                    creature.ai_state_data.critter_escape_ms = super::decision::ESCAPE_TIMER_MS;
+                });
+        }
+
+        AIAction::PetFollowOwner => {
+            world
+                .managers
+                .creature_mgr
+                .with_creature_mut(creature_guid, |creature| {
+                    creature.ai_state = AIState::Idle;
+                    creature.combat.leave_combat();
+                    creature.threat_manager.clear();
+                    creature.unit_flags &= !crate::game::common::unit_flags::IN_COMBAT;
+                    creature.ai_state_data.reset_combat();
+                    creature
+                        .motion_master
+                        .clear_type(MovementGeneratorType::Chase, creature_guid);
+                    if let Some(owner) = creature.owner_guid {
+                        let position = creature.position;
+                        let speed = creature.run_speed();
+                        creature.motion_master.move_follow(
+                            owner,
+                            2.0,
+                            std::f32::consts::FRAC_PI_2,
+                            creature_guid,
+                            position,
+                            speed,
+                        );
+                        creature.following_target = Some(owner);
+                    }
+                });
+            send_combat_exit_update(world, creature_guid);
+        }
+
+        AIAction::None => {}
+    }
+}
+
+/// Start attacking `target_guid`.
+///
+/// A passive creature never attacks. Attacking puts both sides in combat, adds
+/// the target to the threat list, starts the chase unless combat movement is
+/// off, and on the first attack of a fight records where the fight started,
+/// starts the leash clock, calls nearby creatures of the same faction for
+/// assistance and, for raid bosses, pulls the whole dungeon into combat.
+fn attack_start(world: &World, creature_guid: ObjectGuid, target_guid: ObjectGuid) {
+    let now = super::units::now_ms();
+    let Some(outcome) = world
+        .managers
+        .creature_mgr
+        .with_creature_mut(creature_guid, |creature| {
+            if !creature.is_alive() || creature.ai_state_data.react_state == ReactState::Passive {
+                return None;
+            }
+            let fresh = creature.ai_state != AIState::Combat;
+            let position = creature.position;
+            creature.ai_state = AIState::Combat;
+            creature.combat.in_combat = true;
+            creature.combat.attackers.insert(target_guid);
+            creature.combat.attacking = Some(target_guid);
+            creature.threat_manager.add_threat(target_guid, 0.0);
+            creature.unit_flags |= crate::game::common::unit_flags::IN_COMBAT;
+            if fresh {
+                creature.ai_state_data.combat_start = Some(position);
+                creature.ai_state_data.extend_leash(now);
+                creature.ai_state_data.call_for_help_timer = 0;
+                creature.ai_state_data.combat_pulse_timer = 0;
+            }
+
+            creature.move_spline.stop();
+            if creature.ai_state_data.combat_movement_enabled {
+                let combat_reach = creature.combat_reach;
+                let run_speed = creature.run_speed();
+                creature.motion_master.chase(
+                    target_guid,
+                    creature_guid,
+                    position,
+                    combat_reach,
+                    run_speed,
+                );
+            }
+            Some((
+                fresh,
+                position,
+                creature.ai_state_data.melee_enabled,
+                creature.ai_profile.static_flags2
+                    & crate::game::common::creature_flags::CREATURE_STATIC_FLAG_2_FORCE_RAID_COMBAT
+                    != 0,
+            ))
+        })
+        .flatten()
+    else {
+        return;
+    };
+    let (fresh, position, melee, force_raid_combat) = outcome;
+
+    world
+        .systems
+        .creature_movement
+        .send_stop_packet(creature_guid, position, world);
+    if melee {
+        send_attack_start(world, creature_guid, target_guid);
+    }
+    send_combat_state_update(world, creature_guid, target_guid);
+    put_in_combat_with(world, target_guid, creature_guid);
+
+    if fresh {
+        super::system::queue_event(
+            world,
+            creature_guid,
+            super::types::AIEvent::CombatStarted {
+                initial_aggressor: target_guid,
+            },
+        );
+        crate::game::instance::scripts::queue_creature_combat_event(
+            world,
+            creature_guid,
+            crate::game::instance::scripts::CreatureCombatEvent::EnterCombat,
+        );
+        world.systems.linking.on_event(
+            world,
+            creature_guid,
+            crate::game::coordination::LinkEvent::Aggro { enemy: target_guid },
+        );
+        crate::game::creature::formation::on_member_attack_start(world, creature_guid, target_guid);
+    }
+
+    super::assist::call_assistance(world, creature_guid);
+    if fresh && force_raid_combat {
+        super::assist::set_in_combat_with_zone(world, creature_guid, true);
+    }
+}
+
+/// Switch to a new victim in the middle of a fight.
+fn switch_target(world: &World, creature_guid: ObjectGuid, target_guid: ObjectGuid) {
+    let melee = world
+        .managers
+        .creature_mgr
+        .with_creature_mut(creature_guid, |creature| {
+            creature.combat.attacking = Some(target_guid);
+            if creature.ai_state == AIState::Combat
+                && creature.ai_state_data.combat_movement_enabled
+            {
+                let position = creature.position;
+                let combat_reach = creature.combat_reach;
+                let run_speed = creature.run_speed();
+                creature.motion_master.chase(
+                    target_guid,
+                    creature_guid,
+                    position,
+                    combat_reach,
+                    run_speed,
+                );
+            }
+            creature.ai_state_data.melee_enabled
+        });
+    if melee == Some(true) {
+        send_attack_start(world, creature_guid, target_guid);
+    }
+    send_combat_state_update(world, creature_guid, target_guid);
+}
+
+/// Turn to face the victim. The new orientation is only broadcast when it
+/// changed noticeably, so a creature standing in melee does not resend it
+/// every update.
+pub(crate) fn face_target(world: &World, creature_guid: ObjectGuid, target_guid: ObjectGuid) {
+    const FACING_EPSILON: f32 = 0.1;
+    let target_pos = if target_guid.is_player() {
+        world.managers.player_mgr.get_player_position(target_guid)
+    } else {
+        world.managers.creature_mgr.get_position(target_guid)
+    };
+    let Some(target_pos) = target_pos else {
+        return;
+    };
+    let changed = world
+        .managers
+        .creature_mgr
+        .with_creature_mut(creature_guid, |creature| {
+            if creature.move_spline.is_active() {
+                return None;
+            }
+            let position = creature.position;
+            let angle = (target_pos.y - position.y).atan2(target_pos.x - position.x);
+            let mut diff = (angle - position.o).abs() % std::f32::consts::TAU;
+            if diff > std::f32::consts::PI {
+                diff = std::f32::consts::TAU - diff;
+            }
+            creature.position.o = angle;
+            (diff > FACING_EPSILON).then_some((position, angle))
+        })
+        .flatten();
+    if let Some((position, angle)) = changed {
+        world
+            .systems
+            .creature_movement
+            .send_facing_packet(creature_guid, position, angle, world);
+    }
+}
+
+/// Leave combat and walk home. Hits on the way show EVADE and do not pull the
+/// creature back; health comes back through normal out-of-combat regeneration.
+pub(crate) fn enter_evade_mode(world: &World, creature_guid: ObjectGuid) {
+    // A player's pet does not walk home: it goes back to its owner.
+    let player_pet = world
+        .managers
+        .creature_mgr
+        .with_creature(creature_guid, |c| c.owner_guid.is_some_and(|o| o.is_player()))
+        .unwrap_or(false);
+    if player_pet {
+        execute_single_action(world, creature_guid, AIAction::PetFollowOwner);
+        return;
+    }
+    let Some(alive) = world
+        .managers
+        .creature_mgr
+        .with_creature_mut(creature_guid, |creature| {
+            let alive = creature.is_alive();
+            creature.combat.leave_combat();
+            creature.threat_manager.clear();
+            creature.unit_flags &= !crate::game::common::unit_flags::IN_COMBAT;
+            creature.ai_state_data.reset_combat();
+            if !alive {
+                return false;
+            }
+            let position = creature.position;
+            creature.move_spline.stop();
+            creature.motion_master.clear(creature_guid);
+            let home = creature.home_position;
+            let run_speed = creature.run_speed();
+            creature
+                .motion_master
+                .return_home(home, creature_guid, position, run_speed);
+            creature.ai_state = AIState::Evading;
+            // An evading creature is untapped again.
+            creature.loot_recipient = None;
+            // Back to the template's spell list, melee and combat movement.
+            let static_flags1 = creature.static_flags1;
+            creature.ai_state_data.reset_combat_toggles(static_flags1);
+            reset_spells_list(&mut creature.ai_state_data);
+            true
+        })
+    else {
+        return;
+    };
+
+    send_combat_exit_update(world, creature_guid);
+    if !alive {
+        return;
+    }
+    remove_auras_at_reset(world, creature_guid);
+    super::system::queue_event(
+        world,
+        creature_guid,
+        super::types::AIEvent::CombatEnded {
+            reason: super::types::CombatEndReason::Evaded,
+        },
+    );
+    crate::game::instance::scripts::queue_creature_combat_event(
+        world,
+        creature_guid,
+        crate::game::instance::scripts::CreatureCombatEvent::Evade,
+    );
+    world
+        .systems
+        .linking
+        .on_event(world, creature_guid, crate::game::coordination::LinkEvent::Evade);
+    crate::game::creature::formation::on_member_evade(world, creature_guid);
+}
+
+/// Arrived home after an evade: idle again, idle movement resumes.
+fn reached_home(world: &World, creature_guid: ObjectGuid) {
+    world
+        .managers
+        .creature_mgr
+        .with_creature_mut(creature_guid, |creature| {
+            creature.ai_state = AIState::Idle;
+            creature.combat.leave_combat();
+            creature.threat_manager.clear();
+            creature.unit_flags &= !crate::game::common::unit_flags::IN_COMBAT;
+            creature
+                .motion_master
+                .clear_type(MovementGeneratorType::Chase, creature_guid);
+            creature
+                .motion_master
+                .reinitialize_patrol_movement(creature_guid);
+            // Formation members fall back in behind their leader on the next pass.
+            if creature.owner_guid.is_none() {
+                creature.following_target = None;
+            }
+        });
+    send_combat_exit_update(world, creature_guid);
+    super::system::queue_event(world, creature_guid, super::types::AIEvent::ReachedHome);
+}
+
+/// Restart every spell of the list on its initial delay.
+fn reset_spells_list(data: &mut super::types::AIStateData) {
+    let entries: Vec<_> = data.spells_list.iter().map(|s| s.inner.clone()).collect();
+    data.set_spells_list(entries);
+}
+
+/// Remove the auras an evading creature drops: everything except positive
+/// temporary buffs cast by players and auras flagged to survive an evade, or
+/// only negative auras when the creature keeps its positive auras.
+fn remove_auras_at_reset(world: &World, creature_guid: ObjectGuid) {
+    const SPELL_CUSTOM_NOT_REMOVED_ON_EVADE: u32 = 0x400;
+    let Some((auras, keep_positive)) = world
+        .managers
+        .creature_mgr
+        .with_creature(creature_guid, |c| {
+            (
+                c.auras
+                    .all_auras()
+                    .map(|a| (a.spell_id, a.caster_guid, a.duration_ms.is_none()))
+                    .collect::<Vec<_>>(),
+                c.ai_profile.has_extra_flag(
+                    crate::game::common::creature_flags::CREATURE_FLAG_EXTRA_KEEP_POSITIVE_AURAS_ON_EVADE,
+                ),
+            )
+        })
+    else {
+        return;
+    };
+    let mut to_remove: Vec<u32> = auras
+        .into_iter()
+        .filter(|(spell_id, caster, permanent)| {
+            let Some(spell) = world.managers.spell_mgr.get(*spell_id) else {
+                return false;
+            };
+            let positive = spell.is_positive_spell();
+            if keep_positive {
+                return !positive;
+            }
+            let player_buff = caster.is_player() && !*permanent && positive;
+            !player_buff && spell.custom & SPELL_CUSTOM_NOT_REMOVED_ON_EVADE == 0
+        })
+        .map(|(spell_id, _, _)| spell_id)
+        .collect();
+    to_remove.sort_unstable();
+    to_remove.dedup();
+    if to_remove.is_empty() {
+        return;
+    }
+    let Ok(handle) = tokio::runtime::Handle::try_current() else {
+        world
+            .managers
+            .creature_mgr
+            .with_creature_mut(creature_guid, |c| {
+                for spell_id in &to_remove {
+                    c.remove_aura(*spell_id);
+                }
+            });
+        return;
+    };
+    let world = world.clone();
+    handle.spawn(async move {
+        for spell_id in to_remove {
+            if let Err(e) = world
+                .systems
+                .auras
+                .remove_spell_auras(creature_guid, spell_id, &world)
+                .await
+            {
+                tracing::debug!("Evade aura removal of {} failed: {}", spell_id, e);
+            }
+        }
+    });
+}
+
+/// Turn melee on or off, telling clients the swing started or stopped.
+pub(crate) fn set_melee_attack(world: &World, creature_guid: ObjectGuid, enabled: bool) {
+    let victim = world
+        .managers
+        .creature_mgr
+        .with_creature_mut(creature_guid, |creature| {
+            if creature.ai_state_data.melee_enabled == enabled {
+                return None;
+            }
+            creature.ai_state_data.melee_enabled = enabled;
+            creature.combat.attacking
+        })
+        .flatten();
+    if let Some(victim) = victim {
+        if enabled {
+            send_attack_start(world, creature_guid, victim);
+        } else {
+            let stop = oxcore_shared::messages::combat::SmsgAttackStop {
+                attacker_guid: creature_guid,
+                target_guid: victim,
+                unk: 0,
+            };
+            broadcast_around_creature(world, creature_guid, &stop);
         }
     }
 }
 
+/// Turn chasing on or off. Turning it off mid-fight stops the chase where the
+/// creature stands; turning it on resumes chasing the victim.
+pub(crate) fn set_combat_movement(world: &World, creature_guid: ObjectGuid, enabled: bool) {
+    let stopped_at = world
+        .managers
+        .creature_mgr
+        .with_creature_mut(creature_guid, |creature| {
+            if creature.ai_state_data.combat_movement_enabled == enabled {
+                return None;
+            }
+            creature.ai_state_data.combat_movement_enabled = enabled;
+            let victim = creature.combat.attacking?;
+            let position = creature.position;
+            if enabled {
+                let combat_reach = creature.combat_reach;
+                let run_speed = creature.run_speed();
+                creature.motion_master.chase(
+                    victim,
+                    creature_guid,
+                    position,
+                    combat_reach,
+                    run_speed,
+                );
+                None
+            } else if creature.motion_master.active_generator() == MovementGeneratorType::Chase {
+                creature
+                    .motion_master
+                    .clear_type(MovementGeneratorType::Chase, creature_guid);
+                creature.motion_master.move_idle(creature_guid);
+                creature.move_spline.stop();
+                Some(position)
+            } else {
+                None
+            }
+        })
+        .flatten();
+    if let Some(position) = stopped_at {
+        world
+            .systems
+            .creature_movement
+            .send_stop_packet(creature_guid, position, world);
+    }
+}
+
+/// Put `target` in combat with the creature that just engaged it.
+pub(crate) fn put_in_combat_with(world: &World, target: ObjectGuid, creature_guid: ObjectGuid) {
+    if target.is_player() {
+        world
+            .managers
+            .player_mgr
+            .with_player_mut(target, |p| p.combat.enter_combat(creature_guid));
+    } else {
+        let timestamp = super::units::now_ms();
+        world.managers.creature_mgr.with_creature_mut(target, |c| {
+            if c.is_alive() {
+                c.combat.enter_combat(creature_guid, timestamp);
+            }
+        });
+    }
+}
+
+/// Speak a broadcast text line: say, yell or emote, with its sound and emote.
+pub(crate) fn script_text(world: &World, creature_guid: ObjectGuid, text_id: i32) {
+    script_text_as(world, creature_guid, text_id, None);
+}
+
+/// Speak a broadcast text line, optionally overriding its chat type
+/// (0 say, 1 yell, 2 emote, 3 boss emote, 6 zone yell, 7 zone emote).
+pub(crate) fn script_text_as(
+    world: &World,
+    creature_guid: ObjectGuid,
+    text_id: i32,
+    chat_type_override: Option<u32>,
+) {
+    let text = u32::try_from(text_id)
+        .ok()
+        .and_then(|id| world.systems.gossip_manager.get_broadcast_text(id));
+    let Some(text) = text else {
+        tracing::debug!("Creature {:?} has no broadcast text {}", creature_guid, text_id);
+        return;
+    };
+    let line = if text.male_text.is_empty() {
+        &text.female_text
+    } else {
+        &text.male_text
+    };
+    // Broadcast chat types: 0 say, 1 yell, 2 emote, 3 boss emote, 6 zone yell.
+    let chat_type = match chat_type_override.unwrap_or(text.chat_type as u32) {
+        1 | 6 => 0x0C,
+        2 | 3 | 7 => 0x0D,
+        _ => 0x0B,
+    };
+    if !line.is_empty() {
+        send_creature_chat(world, creature_guid, chat_type, line);
+    }
+    if text.sound_id != 0 {
+        send_creature_sound(world, creature_guid, text.sound_id);
+    }
+    if text.emote_ids[0] != 0 {
+        send_creature_emote(world, creature_guid, text.emote_ids[0]);
+    }
+}
+
+/// Broadcast one unit field of the creature to the players around it.
+pub(crate) fn send_unit_field(world: &World, creature_guid: ObjectGuid, field: u32, value: u32) {
+    use crate::core::common::guid::ObjectGuid as WorldObjectGuid;
+    use oxcore_shared::messages::update::{
+        ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
+    };
+    let world_guid = WorldObjectGuid::new_creature(creature_guid.entry(), creature_guid.counter());
+    let update = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(
+        ValuesUpdateBlock::new(world_guid, ObjectType::Unit).set_field(field, value),
+    ));
+    broadcast_around_creature(world, creature_guid, &update);
+}
+
+
 /// Send health update to nearby players
-fn send_health_update(world: &World, creature_guid: ObjectGuid) {
+pub(crate) fn send_health_update(world: &World, creature_guid: ObjectGuid) {
     use crate::core::common::guid::ObjectGuid as WorldObjectGuid;
     use crate::game::common::update_fields::UNIT_FIELD_HEALTH;
     use oxcore_shared::messages::update::{
@@ -986,14 +1299,7 @@ fn send_combat_state_update(world: &World, creature_guid: ObjectGuid, target_gui
         .creature_mgr
         .with_creature_mut(creature_guid, |c| c.unit_flags)
     {
-        // Strip blocking flags (same as build_create_msg in manager.rs)
-        let mut flags = raw_flags;
-        flags &= !(unit_flags::NOT_SELECTABLE
-            | unit_flags::SPAWNING
-            | unit_flags::NOT_ATTACKABLE
-            | unit_flags::UNATTACKABLE
-            | unit_flags::NOT_ATTACKABLE_1
-            | unit_flags::IMMUNE_TO_PLAYER);
+        let flags = raw_flags;
 
         let world_guid =
             WorldObjectGuid::new_creature(creature_guid.entry(), creature_guid.counter());
@@ -1014,7 +1320,7 @@ fn send_combat_state_update(world: &World, creature_guid: ObjectGuid, target_gui
 }
 
 /// Send VALUES update when creature leaves combat (clear IN_COMBAT flag + UNIT_FIELD_TARGET)
-fn send_combat_exit_update(world: &World, creature_guid: ObjectGuid) {
+pub(crate) fn send_combat_exit_update(world: &World, creature_guid: ObjectGuid) {
     use crate::core::common::guid::ObjectGuid as WorldObjectGuid;
     use crate::game::common::unit_flags;
     use crate::game::common::update_fields::{UNIT_FIELD_FLAGS, UNIT_FIELD_TARGET};
@@ -1028,14 +1334,7 @@ fn send_combat_exit_update(world: &World, creature_guid: ObjectGuid) {
         .creature_mgr
         .with_creature_mut(creature_guid, |c| c.unit_flags)
     {
-        // Strip blocking flags (same as build_create_msg in manager.rs)
-        let mut flags = raw_flags;
-        flags &= !(unit_flags::NOT_SELECTABLE
-            | unit_flags::SPAWNING
-            | unit_flags::NOT_ATTACKABLE
-            | unit_flags::UNATTACKABLE
-            | unit_flags::NOT_ATTACKABLE_1
-            | unit_flags::IMMUNE_TO_PLAYER);
+        let flags = raw_flags;
 
         let world_guid =
             WorldObjectGuid::new_creature(creature_guid.entry(), creature_guid.counter());
@@ -1065,7 +1364,7 @@ pub fn execute_creature_spell_cast(
     spell_id: u32,
     target_guid: Option<ObjectGuid>,
     triggered: bool,
-) {
+) -> bool {
     use oxcore_shared::messages::spells::{next_cast_sequence, SmsgSpellGo};
     use oxcore_shared::messages::ToWorldPacket;
 
@@ -1078,7 +1377,7 @@ pub fn execute_creature_spell_cast(
                 creature_guid,
                 spell_id
             );
-            return;
+            return false;
         }
     };
 
@@ -1103,7 +1402,7 @@ pub fn execute_creature_spell_cast(
                 creature_guid,
                 spell_id
             );
-            return;
+            return false;
         }
     }
 
@@ -1196,6 +1495,7 @@ pub fn execute_creature_spell_cast(
         target_guid,
         triggered
     );
+    true
 }
 
 /// ScriptedAI::DoCastSpell - Cast a spell from scripted AI.
@@ -1249,34 +1549,34 @@ pub fn do_cast_spell_if_can(
     true
 }
 
-/// CreatureAI::SetSpellsList(uint32 entry) — load a creature_spells template by ID.
-///
-/// Clears the list when entry is 0. Otherwise logs a warning — loading from the
-/// creature_spells DB table is not yet implemented (no Rust repository exists).
-/// Callers that have a pre-loaded list can use `set_spells_list` on AIStateData directly.
+/// Switch the creature to creature_spells list `entry` (0 clears it). Every
+/// spell restarts on its initial delay.
 pub fn set_spells_list_from_db(world: &World, creature_guid: ObjectGuid, entry: u32) {
-    if entry == 0 {
-        world
-            .managers
-            .creature_mgr
-            .with_creature_mut(creature_guid, |c| {
-                c.ai_state_data.clear_spells_list();
-            });
+    let list = (entry != 0)
+        .then(|| world.managers.creature_mgr.spell_list(entry))
+        .flatten();
+    if entry != 0 && list.is_none() {
+        tracing::warn!(
+            "[AI] Creature {:?} asked for unknown creature_spells entry {}",
+            creature_guid,
+            entry
+        );
         return;
     }
-    // ... CreatureSpellsList loading from DB not yet implemented
-    tracing::warn!(
-        "[AI] Creature {:?} tried to load creature_spells entry {} — not yet implemented",
-        creature_guid,
-        entry
-    );
+    world
+        .managers
+        .creature_mgr
+        .with_creature_mut(creature_guid, |c| match &list {
+            Some(list) => c.ai_state_data.set_spells_list(list.as_ref().clone()),
+            None => c.ai_state_data.clear_spells_list(),
+        });
 }
 
-/// CreatureAI::UpdateSpellsList — ticks the casting delay and fires DoSpellsListCasts
-/// when the delay expires. Matches the 1.2s research-based update interval.
-pub fn update_spells_list(world: &World, creature_guid: ObjectGuid, diff_ms: u32) {
-    const CREATURE_CASTING_DELAY: u32 = 1200;
+/// Creature spell lists are worked through every 1.2 seconds.
+const CREATURE_CASTING_DELAY: u32 = 1200;
 
+/// Tick the casting delay and work through the spell list when it expires.
+pub fn update_spells_list(world: &World, creature_guid: ObjectGuid, diff_ms: u32) {
     let cast_elapsed_ms = world
         .managers
         .creature_mgr
@@ -1284,11 +1584,7 @@ pub fn update_spells_list(world: &World, creature_guid: ObjectGuid, diff_ms: u32
             let data = &mut c.ai_state_data;
             if data.casting_delay <= diff_ms {
                 let desync = diff_ms - data.casting_delay;
-                data.casting_delay = if desync < CREATURE_CASTING_DELAY {
-                    CREATURE_CASTING_DELAY - desync
-                } else {
-                    0
-                };
+                data.casting_delay = CREATURE_CASTING_DELAY.saturating_sub(desync);
                 Some(CREATURE_CASTING_DELAY.saturating_add(desync))
             } else {
                 data.casting_delay -= diff_ms;
@@ -1302,83 +1598,308 @@ pub fn update_spells_list(world: &World, creature_guid: ObjectGuid, diff_ms: u32
     }
 }
 
-/// CreatureAI::DoSpellsListCasts — iterate the creature's spell list, decrement
-/// cooldowns, and cast spells whose cooldown has expired.
-///
-/// Casting result handling is approximated: only SPELL_CAST_OK resets the cooldown;
-/// other results (fleeing, in-progress, try-again, etc.) leave cooldown at 0 to
-/// retry next tick. Target resolution via castTarget/GetTargetByType is not yet
-/// implemented — uses the creature's current attack target.
-pub fn do_spells_list_casts(world: &World, creature_guid: ObjectGuid, diff_ms: u32) {
-    // Gather the spells list and current attack target
-    let (spells, attack_target) = world
-        .managers
-        .creature_mgr
-        .with_creature(creature_guid, |c| {
-            (c.ai_state_data.spells_list.clone(), c.combat.attacking)
+/// Cast flags of creature spell lists and script casts.
+pub mod cast_flags {
+    pub const CF_INTERRUPT_PREVIOUS: u16 = 0x001;
+    pub const CF_TRIGGERED: u16 = 0x002;
+    pub const CF_FORCE_CAST: u16 = 0x004;
+    /// Ranged casters: stop chasing and meleeing while this spell succeeds.
+    pub const CF_MAIN_RANGED_SPELL: u16 = 0x008;
+    /// Only when the target cannot be reached.
+    pub const CF_TARGET_UNREACHABLE: u16 = 0x010;
+    /// Only when the target lacks the spell's aura.
+    pub const CF_AURA_NOT_PRESENT: u16 = 0x020;
+    pub const CF_ONLY_IN_MELEE: u16 = 0x040;
+    pub const CF_NOT_IN_MELEE: u16 = 0x080;
+    /// Only to interrupt a target that is casting.
+    pub const CF_TARGET_CASTING: u16 = 0x100;
+}
+
+/// Outcome of an attempted creature cast.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CastOutcome {
+    Ok,
+    /// Fleeing or still casting: retry next update without a cooldown.
+    Retry,
+    /// The chance roll failed: the spell goes on cooldown anyway.
+    TryAgain,
+    /// Any other failure.
+    Failed,
+}
+
+/// Decide whether a creature may cast `spell_id` at `target` now, then cast it.
+pub fn try_to_cast(
+    world: &World,
+    creature_guid: ObjectGuid,
+    target: Option<ObjectGuid>,
+    spell_id: u32,
+    flags: u16,
+    chance: u8,
+) -> CastOutcome {
+    use cast_flags::*;
+    const SPELL_CUSTOM_BEHIND_TARGET: u32 = 0x040;
+    const SPELL_AURA_MOD_POSSESS: u32 = 2;
+    const SPELL_AURA_MOD_CHARM: u32 = 6;
+    const SPELL_EFFECT_APPLY_AURA: u32 = 6;
+    const SPELL_EFFECT_SUMMON_GUARDIAN: u32 = 42;
+
+    let Some(target) = target else {
+        return CastOutcome::Failed;
+    };
+    let Some(spell) = world.managers.spell_mgr.get(spell_id) else {
+        return CastOutcome::Failed;
+    };
+    let Some(me) = super::units::resolve_unit(world, creature_guid) else {
+        return CastOutcome::Failed;
+    };
+    let Some(other) = super::units::resolve_unit(world, target) else {
+        return CastOutcome::Failed;
+    };
+    let Some((fleeing, chasing_unreachable, threat_count)) =
+        world.managers.creature_mgr.with_creature_mut(creature_guid, |c| {
+            let generator = c.motion_master.active_generator();
+            let unreachable = generator == MovementGeneratorType::Chase
+                && c.motion_master
+                    .get_generator_mut(MovementGeneratorType::Chase)
+                    .and_then(|g| {
+                        g.as_any_mut()
+                            .downcast_mut::<crate::game::creature::movement::generators::ChaseMovementGenerator>()
+                    })
+                    .is_some_and(|chase| !chase.is_reachable());
+            (
+                generator == MovementGeneratorType::Fleeing,
+                unreachable || !c.ai_state_data.combat_movement_enabled,
+                c.threat_manager.get_threat_list().len(),
+            )
         })
-        .unwrap_or_default();
+    else {
+        return CastOutcome::Failed;
+    };
 
-    if spells.is_empty() {
-        return;
+    if flags & CF_AURA_NOT_PRESENT != 0 && target_has_aura(world, target, spell_id) {
+        return CastOutcome::Failed;
     }
-
-    let mut spells_to_update: Vec<(usize, u32)> = Vec::new();
-    let mut dont_cast = false;
-
-    for (idx, spell) in spells.iter().enumerate() {
-        if spell.cooldown <= diff_ms {
-            // Cooldown expired
-            let cooldown = 0u32;
-
-            // Skip non-triggered spells if already cast this tick or creature is casting
-            let is_triggered = (spell.inner.cast_flags & 0x2) != 0;
-            let interrupt_prev = (spell.inner.cast_flags & 0x1) != 0;
-            if !(is_triggered || interrupt_prev) {
-                if dont_cast {
-                    spells_to_update.push((idx, spell.cooldown.saturating_sub(diff_ms)));
-                    continue;
-                }
-                // ... IsNonMeleeSpellCasted check skipped — not tracked for creatures yet
+    if fleeing {
+        return CastOutcome::Retry;
+    }
+    if flags & CF_TARGET_CASTING != 0 && !is_casting(world, target) {
+        return CastOutcome::Failed;
+    }
+    let in_melee = super::units::in_melee_range(&me.position, me.combat_reach, &other);
+    if flags & CF_ONLY_IN_MELEE != 0 && !in_melee {
+        return CastOutcome::Failed;
+    }
+    if flags & CF_NOT_IN_MELEE != 0 && in_melee {
+        return CastOutcome::Failed;
+    }
+    if flags & CF_TARGET_UNREACHABLE != 0 && (in_melee || !chasing_unreachable) {
+        return CastOutcome::Failed;
+    }
+    if flags & CF_FORCE_CAST == 0 {
+        if spell.custom & SPELL_CUSTOM_BEHIND_TARGET != 0
+            && super::aggro::is_in_front(
+                other.position.o,
+                (other.position.x, other.position.y),
+                (me.position.x, me.position.y),
+            )
+        {
+            return CastOutcome::Failed;
+        }
+        let charm = (0..3).any(|i| {
+            spell.effect[i] == SPELL_EFFECT_APPLY_AURA
+                && matches!(
+                    spell.effect_apply_aura_name[i],
+                    SPELL_AURA_MOD_CHARM | SPELL_AURA_MOD_POSSESS
+                )
+        });
+        if charm && threat_count == 1 {
+            return CastOutcome::Failed;
+        }
+        let guardian_entry = (0..3)
+            .find(|&i| spell.effect[i] == SPELL_EFFECT_SUMMON_GUARDIAN)
+            .map(|i| spell.effect_misc_value[i].max(0) as u32);
+        if let Some(entry) = guardian_entry {
+            if crate::game::creature::summon::has_summon_with_entry(creature_guid, entry) {
+                return CastOutcome::Failed;
             }
-
-            let target = attack_target;
-            let spell_id = spell.inner.spell_id as u32;
-
-            // Attempt cast via execute_creature_spell_cast
-            // ... TryToCast result handling approximated (only OK resets cooldown)
-            let triggered = is_triggered;
-            if world.managers.spell_mgr.get(spell_id).is_some() {
-                execute_creature_spell_cast(world, creature_guid, spell_id, target, triggered);
-                // Cast succeeded
-                dont_cast = !triggered;
-                let new_cooldown = if spell.inner.delay_repeat_max > spell.inner.delay_repeat_min {
-                    rand::thread_rng()
-                        .gen_range(spell.inner.delay_repeat_min..=spell.inner.delay_repeat_max)
-                } else {
-                    spell.inner.delay_repeat_min
-                };
-                spells_to_update.push((idx, new_cooldown));
-            } else {
-                // Unknown spell — keep cooldown at 0 for next tick
-                spells_to_update.push((idx, 0));
-            }
-        } else {
-            spells_to_update.push((idx, spell.cooldown.saturating_sub(diff_ms)));
         }
     }
 
-    // Apply cooldown updates
+    // The checks a cast makes before it starts: range and line of sight.
+    if target != creature_guid {
+        let range = super::script_target::spell_max_range(world, &spell);
+        if range > 0.0 && super::units::distance(&me.position, &other.position) > range + other.combat_reach
+        {
+            return CastOutcome::Failed;
+        }
+        if !world.managers.vmap_mgr.is_in_line_of_sight(
+            me.map_id,
+            me.instance_id,
+            me.position,
+            other.position,
+        ) {
+            return CastOutcome::Failed;
+        }
+    }
+
+    if chance < 100 && rand::thread_rng().gen_range(0..100u32) >= chance as u32 {
+        return CastOutcome::TryAgain;
+    }
+    if execute_creature_spell_cast(
+        world,
+        creature_guid,
+        spell_id,
+        Some(target),
+        flags & CF_TRIGGERED != 0,
+    ) {
+        CastOutcome::Ok
+    } else {
+        CastOutcome::Failed
+    }
+}
+
+fn target_has_aura(world: &World, target: ObjectGuid, spell_id: u32) -> bool {
+    if target.is_player() {
+        world
+            .managers
+            .player_mgr
+            .with_player(target, |p| p.auras.container.has_aura(spell_id))
+            .unwrap_or(false)
+    } else {
+        world
+            .managers
+            .creature_mgr
+            .with_creature(target, |c| c.auras.has_aura(spell_id))
+            .unwrap_or(false)
+    }
+}
+
+/// A player in the middle of a cast or channel.
+fn is_casting(world: &World, unit: ObjectGuid) -> bool {
+    use crate::game::player::spells::state::CurrentSpellType;
+    unit.is_player()
+        && world
+            .managers
+            .player_mgr
+            .with_player(unit, |p| {
+                p.spells.current_spells[CurrentSpellType::Generic as usize].is_some()
+                    || p.spells.current_spells[CurrentSpellType::Channeled as usize].is_some()
+            })
+            .unwrap_or(false)
+}
+
+/// Work through the spell list: each spell whose cooldown ran out tries to
+/// cast at its target type. Only one untriggered spell succeeds per pass.
+/// A ranged caster stops chasing and meleeing while its main spell succeeds
+/// and resumes when it fails.
+pub fn do_spells_list_casts(world: &World, creature_guid: ObjectGuid, diff_ms: u32) {
+    use cast_flags::*;
+    let Some(spells) = world
+        .managers
+        .creature_mgr
+        .with_creature(creature_guid, |c| c.ai_state_data.spells_list.clone())
+    else {
+        return;
+    };
+    if spells.is_empty() {
+        return;
+    }
+    let Some(source) = super::script_target::Source::of_creature(world, creature_guid) else {
+        return;
+    };
+
+    let repeat_delay = |entry: &super::types::CreatureSpellsEntry| {
+        if entry.delay_repeat_max > entry.delay_repeat_min {
+            rand::thread_rng().gen_range(entry.delay_repeat_min..=entry.delay_repeat_max)
+        } else {
+            entry.delay_repeat_min
+        }
+    };
+
+    let mut cooldowns: Vec<u32> = Vec::with_capacity(spells.len());
+    let mut dont_cast = false;
+    let mut main_ranged: Option<bool> = None;
+
+    for spell in &spells {
+        let entry = &spell.inner;
+        if spell.cooldown > diff_ms {
+            cooldowns.push(spell.cooldown - diff_ms);
+            continue;
+        }
+        let mut cooldown = 0;
+        if entry.cast_flags & (CF_TRIGGERED | CF_INTERRUPT_PREVIOUS) == 0 && dont_cast {
+            cooldowns.push(cooldown);
+            continue;
+        }
+        let spell_id = entry.spell_id as u32;
+        let spell_entry = world.managers.spell_mgr.get(spell_id);
+        // The provided target of a spell list is the creature itself.
+        let target = super::script_target::get_target_by_type(
+            world,
+            &source,
+            Some(creature_guid),
+            entry.cast_target,
+            entry.target_param1,
+            entry.target_param2,
+            spell_entry.as_deref(),
+        );
+        let ranged = entry.cast_flags & CF_MAIN_RANGED_SPELL != 0;
+        match try_to_cast(
+            world,
+            creature_guid,
+            target,
+            spell_id,
+            entry.cast_flags,
+            entry.probability,
+        ) {
+            CastOutcome::Ok => {
+                dont_cast = entry.cast_flags & CF_TRIGGERED == 0;
+                cooldown = repeat_delay(entry);
+                if ranged {
+                    main_ranged = Some(false);
+                }
+                if entry.script_id != 0 {
+                    tracing::debug!(
+                        "[AI] Creature {:?} spell {} would start creature_spells_scripts {}",
+                        creature_guid,
+                        spell_id,
+                        entry.script_id
+                    );
+                }
+            }
+            CastOutcome::Retry => {}
+            CastOutcome::TryAgain => {
+                cooldown = repeat_delay(entry);
+                if ranged {
+                    main_ranged = Some(true);
+                }
+            }
+            CastOutcome::Failed => {
+                if ranged {
+                    main_ranged = Some(true);
+                }
+            }
+        }
+        cooldowns.push(cooldown);
+    }
+
     world
         .managers
         .creature_mgr
         .with_creature_mut(creature_guid, |c| {
-            for (idx, cd) in spells_to_update {
-                if let Some(entry) = c.ai_state_data.spells_list.get_mut(idx) {
-                    entry.cooldown = cd;
-                }
+            for (entry, cooldown) in c.ai_state_data.spells_list.iter_mut().zip(cooldowns) {
+                entry.cooldown = cooldown;
             }
         });
+
+    // Ranged casters: success holds position, failure resumes chase and melee.
+    if let Some(enable) = main_ranged {
+        if !enable {
+            execute_single_action(world, creature_guid, AIAction::StopMovement);
+        }
+        set_combat_movement(world, creature_guid, enable);
+        set_melee_attack(world, creature_guid, enable);
+    }
 }
 
 /// Apply spell damage from a creature to a target.
@@ -1493,7 +2014,7 @@ fn send_creature_spell_damage_log(
 }
 
 /// Send SMSG_MESSAGECHAT for creature speech (Say, Yell, Emote text).
-fn send_creature_chat(world: &World, creature_guid: ObjectGuid, chat_type: u8, text: &str) {
+pub(crate) fn send_creature_chat(world: &World, creature_guid: ObjectGuid, chat_type: u8, text: &str) {
     use oxcore_shared::game::chat::ChatMsg;
     use oxcore_shared::messages::chat::SmsgMessageChat;
     use oxcore_shared::messages::ToWorldPacket;
@@ -1527,7 +2048,7 @@ fn send_creature_chat(world: &World, creature_guid: ObjectGuid, chat_type: u8, t
 }
 
 /// Send SMSG_EMOTE for creature emote animation.
-fn send_creature_emote(world: &World, creature_guid: ObjectGuid, emote_id: u32) {
+pub(crate) fn send_creature_emote(world: &World, creature_guid: ObjectGuid, emote_id: u32) {
     use oxcore_shared::protocol::{Opcode, WorldPacket};
 
     let mut packet = WorldPacket::new(Opcode::SMSG_EMOTE);
@@ -1538,7 +2059,7 @@ fn send_creature_emote(world: &World, creature_guid: ObjectGuid, emote_id: u32) 
 }
 
 /// Send SMSG_PLAY_OBJECT_SOUND for creature sounds.
-fn send_creature_sound(world: &World, creature_guid: ObjectGuid, sound_id: u32) {
+pub(crate) fn send_creature_sound(world: &World, creature_guid: ObjectGuid, sound_id: u32) {
     use oxcore_shared::protocol::{Opcode, WorldPacket};
 
     let mut packet = WorldPacket::new(Opcode::SMSG_PLAY_OBJECT_SOUND);
@@ -1549,7 +2070,7 @@ fn send_creature_sound(world: &World, creature_guid: ObjectGuid, sound_id: u32) 
 }
 
 /// Send display ID update to nearby players (for Morph/Demorph).
-fn send_display_update(world: &World, creature_guid: ObjectGuid, display_id: u32) {
+pub(crate) fn send_display_update(world: &World, creature_guid: ObjectGuid, display_id: u32) {
     use crate::core::common::guid::ObjectGuid as WorldObjectGuid;
     use crate::game::common::update_fields::UNIT_FIELD_DISPLAYID;
     use oxcore_shared::messages::update::{
@@ -1739,6 +2260,7 @@ mod tests {
             pickpocketed: false,
             ai_state: AIState::Idle,
             ai_state_data: crate::game::creature::ai::AIStateData::new(),
+            ai_profile: Default::default(),
             auras: crate::game::player::auras::AuraContainer::new(),
             motion_master: crate::game::creature::movement::MotionMaster::new(),
             move_spline: crate::game::creature::movement::MoveSpline::default(),

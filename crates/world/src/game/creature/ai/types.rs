@@ -11,6 +11,8 @@
 use oxcore_shared::protocol::{ObjectGuid, Position};
 use rand::Rng;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 /// AI state machine states
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -58,13 +60,88 @@ pub enum AIType {
 }
 
 impl AIType {
-    /// Determine AI type from creature template
-    /// Phase 4: Simple mapping based on creature type and flags
-    pub fn from_creature_template(creature_type: u32, _static_flags: u32) -> Self {
-        match creature_type {
-            8 => AIType::Critter, // CRITTER type
-            // TODO: Add more mappings based on flags and other criteria
-            _ => AIType::Basic,
+    /// Pick the AI a creature runs, the way the AI selector does: player pets get
+    /// PetAI, then the AI named by `ai_name`, then guards get GuardAI and critters
+    /// CritterAI, and everything else BasicAI. Scripted creatures are switched to
+    /// their Lua AI at runtime.
+    pub fn select(ai_name: &str, creature_type: u8, flags_extra: u32, is_player_pet: bool) -> Self {
+        use crate::game::common::creature_flags::CREATURE_FLAG_EXTRA_GUARD;
+        const CREATURE_TYPE_CRITTER: u8 = 8;
+
+        if is_player_pet {
+            return AIType::Pet;
+        }
+        match ai_name {
+            "EventAI" => return AIType::Event,
+            "GuardAI" => return AIType::Guard,
+            "NullAI" | "NullCreatureAI" => return AIType::Null,
+            "BasicAI" | "AggressorAI" => return AIType::Basic,
+            "TotemAI" => return AIType::Totem,
+            "CritterAI" => return AIType::Critter,
+            "PetAI" => return AIType::Pet,
+            _ => {}
+        }
+        if flags_extra & CREATURE_FLAG_EXTRA_GUARD != 0 {
+            AIType::Guard
+        } else if creature_type == CREATURE_TYPE_CRITTER {
+            AIType::Critter
+        } else {
+            AIType::Basic
+        }
+    }
+}
+
+/// Per-creature AI configuration taken from its template when it spawns.
+#[derive(Debug, Clone)]
+pub struct CreatureAiProfile {
+    pub ai_type: AIType,
+    pub flags_extra: u32,
+    pub static_flags2: u32,
+    /// creature_spells entry the AI casts from; 0 means none.
+    pub spell_list_id: u32,
+    pub detection_range: f32,
+    pub call_for_help_range: f32,
+    /// Hard chase limit from where the fight started; 0 means none.
+    pub leash_range: f32,
+    pub civilian: bool,
+}
+
+impl Default for CreatureAiProfile {
+    fn default() -> Self {
+        Self {
+            ai_type: AIType::Basic,
+            flags_extra: 0,
+            static_flags2: 0,
+            spell_list_id: 0,
+            detection_range: 18.0,
+            call_for_help_range: 5.0,
+            leash_range: 0.0,
+            civilian: false,
+        }
+    }
+}
+
+impl CreatureAiProfile {
+    pub fn has_extra_flag(&self, flag: u32) -> bool {
+        self.flags_extra & flag != 0
+    }
+
+    /// The react state a fresh spawn starts with.
+    pub fn initial_react_state(&self, static_flags1: u32) -> ReactState {
+        use crate::game::common::creature_flags::{
+            CREATURE_FLAG_EXTRA_NO_AGGRO, CREATURE_FLAG_EXTRA_NO_TARGET,
+            CREATURE_STATIC_FLAG_IGNORE_COMBAT,
+        };
+        const CREATURE_FLAG_EXTRA_INVISIBLE: u32 = 0x0000_0080;
+        if self.ai_type == AIType::Totem
+            || self.has_extra_flag(CREATURE_FLAG_EXTRA_INVISIBLE | CREATURE_FLAG_EXTRA_NO_TARGET)
+            || static_flags1 & CREATURE_STATIC_FLAG_IGNORE_COMBAT != 0
+        {
+            ReactState::Passive
+        } else if self.has_extra_flag(CREATURE_FLAG_EXTRA_NO_AGGRO) {
+            ReactState::Defensive
+        } else {
+            ReactState::Aggressive
         }
     }
 }
@@ -175,7 +252,8 @@ pub enum AIEvent {
     // MOVEMENT EVENTS
     // =========================================================================
     /// Movement to a point was completed
-    MovementComplete { point_id: u32 },
+    /// `motion_type` uses the script numbering (2 waypoint, 9 point).
+    MovementComplete { motion_type: u32, point_id: u32 },
 
     /// Reached home position after evade
     ReachedHome,
@@ -204,6 +282,27 @@ pub enum AIEvent {
     // =========================================================================
     // GROUP/ASSISTANCE EVENTS
     // =========================================================================
+    /// A stealthed unit came close enough to alert this creature.
+    StealthAlert { unit_guid: ObjectGuid },
+
+    /// A script sent this creature an event.
+    ScriptEvent {
+        event_id: u32,
+        data: u32,
+        invoker: Option<ObjectGuid>,
+    },
+
+    /// A member of this creature's group died.
+    GroupMemberDied {
+        member_guid: ObjectGuid,
+        member_entry: u32,
+        was_leader: bool,
+    },
+
+    /// Start fighting this target: a call for assistance was answered, a chest
+    /// was opened nearby, or a script asked for it.
+    Engage { target_guid: ObjectGuid },
+
     /// Another creature called for help
     AssistanceRequested {
         caller_guid: ObjectGuid,
@@ -253,6 +352,15 @@ pub enum AIAction {
 
     /// Return to spawn point
     ReturnToSpawn,
+
+    /// Arrived home after evading: leave combat and resume the idle movement.
+    ReachedHome,
+
+    /// A critter was scared again: restart its thirty second escape timer.
+    ResetCritterEscape,
+
+    /// A pet with nothing to fight goes back to following its owner.
+    PetFollowOwner,
 
     /// Flee from a target
     FleeFrom {
@@ -525,6 +633,24 @@ pub struct CreatureSpellsEntry {
     pub script_id: u32,
 }
 
+impl From<oxcore_db::database::world::models::creature::CreatureSpellRow> for CreatureSpellsEntry {
+    fn from(row: oxcore_db::database::world::models::creature::CreatureSpellRow) -> Self {
+        Self {
+            spell_id: row.spell_id.min(u16::MAX as u32) as u16,
+            probability: row.probability,
+            cast_target: row.cast_target,
+            target_param1: row.target_param1,
+            target_param2: row.target_param2,
+            cast_flags: row.cast_flags,
+            delay_initial_min: row.delay_initial_min,
+            delay_initial_max: row.delay_initial_max,
+            delay_repeat_min: row.delay_repeat_min,
+            delay_repeat_max: row.delay_repeat_max,
+            script_id: row.script_id,
+        }
+    }
+}
+
 /// Runtime entry wrapping CreatureSpellsEntry with a mutable cooldown timer.
 #[derive(Debug, Clone)]
 pub struct CreatureAISpellsEntry {
@@ -546,6 +672,14 @@ impl CreatureAISpellsEntry {
     }
 }
 
+/// Assistants found by a call for help, who join after a short delay.
+#[derive(Debug, Clone)]
+pub struct PendingAssistance {
+    pub delay_ms: u32,
+    pub victim: ObjectGuid,
+    pub assistants: Vec<ObjectGuid>,
+}
+
 /// AI state data - persisted across updates
 #[derive(Debug, Clone, Default)]
 pub struct AIStateData {
@@ -561,19 +695,73 @@ pub struct AIStateData {
     pub spells_list: Vec<CreatureAISpellsEntry>,
     /// Delay before next spell list update
     pub casting_delay: u32,
+    /// How the creature reacts to hostile units around it.
+    pub react_state: ReactState,
+    /// Where the current fight started; the threat area and leash are measured from here.
+    pub combat_start: Option<Position>,
+    /// Last time (unix ms) a hit or crowd control extended the leash. Creatures pulled
+    /// by one call for assistance share this clock, so hitting one keeps the rest engaged.
+    pub leash_extension: Arc<AtomicU64>,
+    /// How long the chase target has been unreachable.
+    pub unreachable_ms: u32,
+    /// Countdown to the next call for help while fighting away from home.
+    pub call_for_help_timer: u32,
+    /// Assistance has been called for this fight.
+    pub assistance_called: bool,
+    /// Assistants answering the call, after the assistance delay.
+    pub pending_assistance: Option<PendingAssistance>,
+    /// No proximity aggro before this time (unix ms); set for five seconds on respawn.
+    pub pacified_until_ms: u64,
+    /// Keeps every player in the dungeon in combat (raid bosses).
+    pub combat_with_zone: bool,
+    /// Countdown to the next three-second combat pulse (zone combat, leash range).
+    pub combat_pulse_timer: u32,
+    /// Critters evade this long after the last scare.
+    pub critter_escape_ms: u32,
+    /// Last stealth alert (unix ms); alerts have a ten second cooldown.
+    pub last_alert_ms: u64,
+    /// Damage never takes health below this (scripted invincibility).
+    pub invincibility_hp: u32,
 }
 
 impl AIStateData {
     /// Create new AI state data with default values
     pub fn new() -> Self {
         Self {
-            spell_cooldowns: HashMap::new(),
-            timers: HashMap::new(),
             melee_enabled: true,
             combat_movement_enabled: true,
-            spells_list: Vec::new(),
-            casting_delay: 0,
+            ..Default::default()
         }
+    }
+
+    /// Melee and combat movement as the template sets them, restored on spawn,
+    /// respawn and whenever a fight ends.
+    pub fn reset_combat_toggles(&mut self, static_flags1: u32) {
+        use crate::game::common::creature_flags::{
+            CREATURE_STATIC_FLAG_NO_MELEE, CREATURE_STATIC_FLAG_SESSILE,
+        };
+        self.melee_enabled = static_flags1 & CREATURE_STATIC_FLAG_NO_MELEE == 0;
+        self.combat_movement_enabled = static_flags1 & CREATURE_STATIC_FLAG_SESSILE == 0;
+    }
+
+    /// Forget everything about the last fight.
+    pub fn reset_combat(&mut self) {
+        self.combat_start = None;
+        self.unreachable_ms = 0;
+        self.call_for_help_timer = 0;
+        self.assistance_called = false;
+        self.pending_assistance = None;
+        self.combat_with_zone = false;
+        self.combat_pulse_timer = 0;
+        self.leash_extension = Arc::new(AtomicU64::new(0));
+    }
+
+    pub fn last_leash_extension_ms(&self) -> u64 {
+        self.leash_extension.load(Ordering::Relaxed)
+    }
+
+    pub fn extend_leash(&self, now_ms: u64) {
+        self.leash_extension.store(now_ms, Ordering::Relaxed);
     }
 
     /// Check if a spell is ready to cast
@@ -603,6 +791,8 @@ impl AIStateData {
         for timer in self.timers.values_mut() {
             *timer = timer.saturating_sub(diff_ms);
         }
+
+        self.critter_escape_ms = self.critter_escape_ms.saturating_sub(diff_ms);
     }
 
     /// Clear all cooldowns (called on evade)

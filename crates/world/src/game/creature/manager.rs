@@ -141,6 +141,42 @@ pub struct CreatureTemplate {
     pub loot_id: u32,            // creature_loot_template entry; 0 means no item loot
     pub pickpocket_loot_id: u32, // pickpocketing_loot_template entry
     pub skinning_loot_id: u32,   // skinning_loot_template entry; 0 means not skinnable
+    /// Behavior columns read by creature AI.
+    pub ai: CreatureAiTemplate,
+}
+
+/// The creature_template columns that drive AI behavior.
+#[derive(Debug, Clone)]
+pub struct CreatureAiTemplate {
+    /// AI chosen by name: EventAI, GuardAI, NullAI, BasicAI, TotemAI, ...
+    pub ai_name: String,
+    /// Scripted AI name; scripted creatures run their Lua AI.
+    pub script_name: String,
+    /// creature_spells entry cast in combat; 0 means none.
+    pub spell_list_id: u32,
+    /// Proximity aggro radius against a target of the same level.
+    pub detection_range: f32,
+    /// Radius of the once-a-second call for help while fighting away from home.
+    pub call_for_help_range: f32,
+    /// Hard chase limit from where the fight started; 0 means none.
+    pub leash_range: f32,
+    pub static_flags2: u32,
+    pub civilian: bool,
+}
+
+impl Default for CreatureAiTemplate {
+    fn default() -> Self {
+        Self {
+            ai_name: String::new(),
+            script_name: String::new(),
+            spell_list_id: 0,
+            detection_range: 18.0,
+            call_for_help_range: 5.0,
+            leash_range: 0.0,
+            static_flags2: 0,
+            civilian: false,
+        }
+    }
 }
 
 /// Base stats from creature_classlevelstats table
@@ -263,6 +299,8 @@ pub struct CreatureManager {
     /// Where each template may move (`inhabit_type`), when not the usual
     /// ground-and-water.
     inhabit_types: DashMap<u32, u8>,
+    /// creature_spells lists by entry.
+    spell_lists: DashMap<u32, Arc<Vec<crate::game::creature::ai::types::CreatureSpellsEntry>>>,
 }
 
 impl CreatureManager {
@@ -283,6 +321,7 @@ impl CreatureManager {
             display_scales: DashMap::new(),
             raid_lock_entries: dashmap::DashSet::new(),
             inhabit_types: DashMap::new(),
+            spell_lists: DashMap::new(),
         }
     }
 
@@ -317,17 +356,8 @@ impl CreatureManager {
         self.current_patch.read().map(|g| *g).unwrap_or(10)
     }
 
-    /// Translate static_flags1 (server-side flags) to unit_flags (client-visible flags)
-    ///
-    /// With special handling:
-    /// - Critters (type=8) and guards always have NOT_SELECTABLE removed
-    /// - Creatures with NPC flags always have NOT_SELECTABLE removed
-    fn compute_unit_flags_from_static(
-        static_flags1: u32,
-        creature_type: u8,
-        npc_flags: u32,
-        flags_extra: u32,
-    ) -> u32 {
+    /// Translate static_flags1 (server-side flags) to the unit flags applied on spawn.
+    fn compute_unit_flags_from_static(static_flags1: u32) -> u32 {
         use crate::game::common::creature_flags::{
             CREATURE_STATIC_FLAG_IMMUNE_TO_NPC, CREATURE_STATIC_FLAG_IMMUNE_TO_PC,
             CREATURE_STATIC_FLAG_UNINTERACTIBLE,
@@ -335,40 +365,15 @@ impl CreatureManager {
         use crate::game::common::unit_flags::{IMMUNE_TO_NPC, IMMUNE_TO_PLAYER, NOT_SELECTABLE};
 
         let mut unit_flags = 0u32;
-
         if (static_flags1 & CREATURE_STATIC_FLAG_IMMUNE_TO_PC) != 0 {
             unit_flags |= IMMUNE_TO_PLAYER;
         }
-
         if (static_flags1 & CREATURE_STATIC_FLAG_IMMUNE_TO_NPC) != 0 {
             unit_flags |= IMMUNE_TO_NPC;
         }
-
         if (static_flags1 & CREATURE_STATIC_FLAG_UNINTERACTIBLE) != 0 {
             unit_flags |= NOT_SELECTABLE;
         }
-
-        // Critters must have unit_flags=0 (fully attackable/selectable)
-        // Critters (Rabbit, Squirrel, etc.) have unit_flags=0 in DB
-        // The static_flags IMMUNE_TO_NPC/UNINTERACTIBLE are server-side AI flags
-        // that should NOT translate to client unit_flags for critters
-        const CREATURE_TYPE_CRITTER: u8 = 8;
-        if creature_type == CREATURE_TYPE_CRITTER {
-            unit_flags = 0;
-            return unit_flags;
-        }
-
-        // Guards must always be selectable
-        const CREATURE_FLAG_EXTRA_GUARD: u32 = 0x00000400;
-        if (flags_extra & CREATURE_FLAG_EXTRA_GUARD) != 0 {
-            unit_flags &= !NOT_SELECTABLE;
-        }
-
-        // Creatures with NPC flags must be selectable (vendors, trainers, quest givers)
-        if npc_flags != 0 {
-            unit_flags &= !NOT_SELECTABLE;
-        }
-
         unit_flags
     }
 
@@ -412,62 +417,6 @@ impl CreatureManager {
             }
         }
         self.creatures.remove(&guid)
-    }
-
-    /// Aggro nearby hostile creatures when the opener interacts with a lock game object
-    /// (chest, door, etc.).
-    pub fn do_aggro_when_opening(
-        &self,
-        opener_guid: ObjectGuid,
-        opener_position: Position,
-        opener_level: u8,
-        opener_faction: u32,
-        opener_is_alive: bool,
-    ) {
-        use crate::game::creature::ai::{
-            calculate_aggro_range, is_valid_aggro_target, should_aggro_creature,
-        };
-
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-
-        // Collect qualifying creature GUIDs first to avoid holding an iterator read-lock
-        // while acquiring per-creature write-locks (potential DashMap shard deadlock).
-        let to_aggro: Vec<ObjectGuid> = self
-            .iter_creatures()
-            .filter_map(|entry| {
-                let creature = entry.value();
-                let aggro_range = calculate_aggro_range(creature.level, opener_level);
-                if !creature
-                    .position
-                    .is_within_range(&opener_position, aggro_range)
-                {
-                    return None;
-                }
-                if !should_aggro_creature(
-                    creature.faction,
-                    creature.unit_flags,
-                    opener_faction,
-                    true,
-                ) {
-                    return None;
-                }
-                if !is_valid_aggro_target(opener_guid, 0, opener_is_alive) {
-                    return None;
-                }
-                Some(*entry.key())
-            })
-            .collect();
-
-        for creature_guid in to_aggro {
-            self.with_creature_mut(creature_guid, |c| {
-                c.combat.enter_combat(opener_guid, timestamp);
-                c.threat_manager.add_threat(opener_guid, 1.0);
-                c.combat.attacking = Some(opener_guid);
-            });
-        }
     }
 
     /// Check if a spawn is already active
@@ -542,12 +491,7 @@ impl CreatureManager {
             }
             let flags_extra = checked_u32(row.flags_extra, "creature_template.flags_extra")?;
             let creature_type = checked_u8(row.creature_type, "creature_template.type")?;
-            let unit_flags = Self::compute_unit_flags_from_static(
-                static_flags1,
-                creature_type,
-                npc_flags,
-                flags_extra,
-            );
+            let unit_flags = Self::compute_unit_flags_from_static(static_flags1);
 
             let template = CreatureTemplate {
                 entry,
@@ -601,6 +545,16 @@ impl CreatureManager {
                     row.skinning_loot_id,
                     "creature_template.skinning_loot_id",
                 )?,
+                ai: CreatureAiTemplate {
+                    ai_name: row.ai_name.trim().to_string(),
+                    script_name: row.script_name.trim().to_string(),
+                    spell_list_id: checked_u32(row.spell_list_id, "creature_template.spell_list_id")?,
+                    detection_range: row.detection_range,
+                    call_for_help_range: row.call_for_help_range,
+                    leash_range: row.leash_range,
+                    static_flags2,
+                    civilian: row.civilian != 0,
+                },
             };
             self.visuals.insert(
                 template.entry,
@@ -641,7 +595,33 @@ impl CreatureManager {
         }
         tracing::info!("Loaded {} creature templates", self.templates.len());
 
+        for list in repo
+            .load_creature_spells()
+            .await
+            .context("Failed to load creature spell lists")?
+        {
+            self.add_spell_list(list.entry, list.spells.into_iter().map(Into::into).collect());
+        }
+        tracing::info!("Loaded {} creature spell lists", self.spell_lists.len());
+
         Ok(())
+    }
+
+    /// Register a creature_spells list.
+    pub fn add_spell_list(
+        &self,
+        entry: u32,
+        spells: Vec<crate::game::creature::ai::types::CreatureSpellsEntry>,
+    ) {
+        self.spell_lists.insert(entry, Arc::new(spells));
+    }
+
+    /// A creature_spells list by entry.
+    pub fn spell_list(
+        &self,
+        entry: u32,
+    ) -> Option<Arc<Vec<crate::game::creature::ai::types::CreatureSpellsEntry>>> {
+        self.spell_lists.get(&entry).map(|l| Arc::clone(&l))
     }
 
     /// Get class level stats for a given class and level
@@ -975,6 +955,9 @@ impl CreatureManager {
 
         self.apply_template_visuals(&mut creature);
         self.apply_model_properties(&mut creature);
+        if let Some(list) = self.spell_list(template.ai.spell_list_id) {
+            creature.ai_state_data.set_spells_list(list.as_ref().clone());
+        }
 
         // Store wander distance for restoring wander after combat
         creature.wander_distance = spawn.wander_distance;
@@ -1029,6 +1012,9 @@ impl CreatureManager {
         self.apply_model_properties(&mut pet);
         pet.owner_guid = Some(owner_guid);
         pet.faction = faction;
+        // Player pets defend themselves and their owner but never pull by proximity.
+        pet.ai_profile.ai_type = crate::game::creature::ai::AIType::Pet;
+        pet.ai_state_data.react_state = crate::game::creature::ai::ReactState::Defensive;
         pet.in_world = true;
         self.creatures.insert(guid, pet);
         Some(guid)
@@ -1257,7 +1243,11 @@ impl CreatureManager {
     pub fn get_highest_threat_target(&self, guid: ObjectGuid) -> Option<ObjectGuid> {
         self.creatures
             .get(&guid)
-            .and_then(|c| c.threat_manager.get_victim())
+            .and_then(|c| {
+                c.threat_manager
+                    .get_victim()
+                    .or_else(|| c.threat_manager.get_threat_list().first().map(|(g, _)| *g))
+            })
     }
 
     /// Get creature's threat list (for AI snapshot)

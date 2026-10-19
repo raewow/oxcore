@@ -1,27 +1,23 @@
-use super::link_flags::{LinkEvent, LinkFlags};
-use super::linking_repository::CreatureLinkRow;
+use super::link_flags::LinkFlags;
+use super::linking_repository::{CreatureEntryLinkRow, CreatureLinkRow};
 use dashmap::DashMap;
-use oxcore_shared::protocol::ObjectGuid;
 
-/// A link between two creatures
+/// A spawn linked to a master spawn.
 #[derive(Debug, Clone)]
 pub struct CreatureLink {
-    /// Master creature spawn GUID
+    /// Master spawn id
     pub master_guid: u32,
-    /// Slave creature spawn GUID
+    /// Slave spawn id
     pub slave_guid: u32,
-    /// Link behavior flags
     pub flags: LinkFlags,
 }
 
-/// Manages creature links - state only, no database
+/// Static creature linking data, by spawn and by entry.
 pub struct LinkingManager {
-    /// Links by master spawn GUID
     links_by_master: DashMap<u32, Vec<CreatureLink>>,
-    /// Links by slave spawn GUID (for reverse lookups)
-    links_by_slave: DashMap<u32, Vec<CreatureLink>>,
-    /// Spawn GUID -> runtime GUID mapping
-    spawn_to_runtime: DashMap<u32, ObjectGuid>,
+    links_by_slave: DashMap<u32, CreatureLink>,
+    entry_links_by_master: DashMap<u32, Vec<CreatureEntryLinkRow>>,
+    entry_links_by_slave: DashMap<(u32, u32), CreatureEntryLinkRow>,
 }
 
 impl LinkingManager {
@@ -29,11 +25,12 @@ impl LinkingManager {
         Self {
             links_by_master: DashMap::new(),
             links_by_slave: DashMap::new(),
-            spawn_to_runtime: DashMap::new(),
+            entry_links_by_master: DashMap::new(),
+            entry_links_by_slave: DashMap::new(),
         }
     }
 
-    /// Load links from repository data
+    /// Load links between spawns.
     pub fn load_from_repository(&self, links: Vec<CreatureLinkRow>) {
         for row in links {
             let link = CreatureLink {
@@ -41,131 +38,56 @@ impl LinkingManager {
                 slave_guid: row.slave_guid,
                 flags: row.flags,
             };
-
             self.links_by_master
                 .entry(row.master_guid)
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(link.clone());
-
-            self.links_by_slave
-                .entry(row.slave_guid)
-                .or_insert_with(Vec::new)
-                .push(link);
+            self.links_by_slave.insert(row.slave_guid, link);
         }
-
-        tracing::info!(
-            "LinkingManager loaded {} masters, {} slaves",
-            self.links_by_master.len(),
-            self.links_by_slave.len()
-        );
     }
 
-    /// Register a spawned creature
-    pub fn register_creature(&self, spawn_id: u32, runtime_guid: ObjectGuid) {
-        self.spawn_to_runtime.insert(spawn_id, runtime_guid);
+    /// Load links between entries.
+    pub fn load_entry_links(&self, links: Vec<CreatureEntryLinkRow>) {
+        for row in links {
+            self.entry_links_by_master
+                .entry(row.master_entry)
+                .or_default()
+                .push(row.clone());
+            self.entry_links_by_slave
+                .insert((row.slave_entry, row.map_id), row);
+        }
     }
 
-    /// Unregister a despawned creature
-    pub fn unregister_creature(&self, spawn_id: u32) {
-        self.spawn_to_runtime.remove(&spawn_id);
-    }
-
-    /// Get runtime GUID from spawn ID
-    pub fn get_runtime_guid(&self, spawn_id: u32) -> Option<ObjectGuid> {
-        self.spawn_to_runtime.get(&spawn_id).map(|r| *r)
-    }
-
-    /// Get slaves for a master
-    pub fn get_slaves(&self, master_spawn_id: u32) -> Vec<(ObjectGuid, LinkFlags)> {
+    /// Spawns linked to this master spawn.
+    pub fn slaves_of_spawn(&self, master_spawn_id: u32) -> Vec<CreatureLink> {
         self.links_by_master
             .get(&master_spawn_id)
-            .map(|links| {
-                links
-                    .iter()
-                    .filter_map(|link| {
-                        self.get_runtime_guid(link.slave_guid)
-                            .map(|guid| (guid, link.flags))
-                    })
-                    .collect()
-            })
+            .map(|links| links.clone())
             .unwrap_or_default()
     }
 
-    /// Get masters for a slave
-    pub fn get_masters(&self, slave_spawn_id: u32) -> Vec<(ObjectGuid, LinkFlags)> {
-        self.links_by_slave
-            .get(&slave_spawn_id)
-            .map(|links| {
-                links
-                    .iter()
-                    .filter_map(|link| {
-                        self.get_runtime_guid(link.master_guid)
-                            .map(|guid| (guid, link.flags))
-                    })
-                    .collect()
-            })
+    /// Entries linked to this master entry.
+    pub fn slaves_of_entry(&self, master_entry: u32) -> Vec<CreatureEntryLinkRow> {
+        self.entry_links_by_master
+            .get(&master_entry)
+            .map(|links| links.clone())
             .unwrap_or_default()
     }
 
-    /// Process a link event from master to slaves
-    pub fn propagate_event_to_slaves(
-        &self,
-        master_spawn_id: u32,
-        event: LinkEvent,
-    ) -> Vec<(ObjectGuid, LinkEvent)> {
-        let mut events = Vec::new();
-
-        if let Some(links) = self.links_by_master.get(&master_spawn_id) {
-            for link in links.iter() {
-                let should_propagate = match event {
-                    LinkEvent::Aggro { .. } | LinkEvent::EnterCombat { .. } => {
-                        link.flags.contains(LinkFlags::AGGRO_ON_AGGRO)
-                    }
-                    LinkEvent::Death => link.flags.contains(LinkFlags::DIE_ON_MASTER_DEATH),
-                    LinkEvent::Respawn => link.flags.contains(LinkFlags::RESPAWN_ON_RESPAWN),
-                    LinkEvent::Evade | LinkEvent::LeaveCombat => {
-                        link.flags.contains(LinkFlags::EVADE_ON_MASTER_EVADE)
-                    }
-                };
-
-                if should_propagate {
-                    if let Some(slave_guid) = self.get_runtime_guid(link.slave_guid) {
-                        events.push((slave_guid, event));
-                    }
-                }
-            }
-        }
-
-        events
+    /// This spawn's own link to its master spawn.
+    pub fn master_of_spawn(&self, slave_spawn_id: u32) -> Option<CreatureLink> {
+        self.links_by_slave.get(&slave_spawn_id).map(|l| l.clone())
     }
 
-    /// Process a link event from slave to masters
-    pub fn propagate_event_to_masters(
-        &self,
-        slave_spawn_id: u32,
-        event: LinkEvent,
-    ) -> Vec<(ObjectGuid, LinkEvent)> {
-        let mut events = Vec::new();
+    /// This entry's own link to its master entry on `map_id`.
+    pub fn master_of_entry(&self, slave_entry: u32, map_id: u32) -> Option<CreatureEntryLinkRow> {
+        self.entry_links_by_slave
+            .get(&(slave_entry, map_id))
+            .map(|l| l.clone())
+    }
 
-        if let Some(links) = self.links_by_slave.get(&slave_spawn_id) {
-            for link in links.iter() {
-                let should_propagate = match event {
-                    LinkEvent::Aggro { .. } | LinkEvent::EnterCombat { .. } => {
-                        link.flags.contains(LinkFlags::TO_AGGRO_ON_AGGRO)
-                    }
-                    LinkEvent::Respawn => link.flags.contains(LinkFlags::TO_RESPAWN_ON_RESPAWN),
-                    _ => false,
-                };
-
-                if should_propagate {
-                    if let Some(master_guid) = self.get_runtime_guid(link.master_guid) {
-                        events.push((master_guid, event));
-                    }
-                }
-            }
-        }
-
-        events
+    pub fn link_count(&self) -> usize {
+        self.links_by_slave.len() + self.entry_links_by_slave.len()
     }
 }
 

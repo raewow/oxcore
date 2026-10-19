@@ -32,7 +32,12 @@ impl CreatureRepository {
                        "rank"::BIGINT AS rank, spell_id1::BIGINT AS spell_id1,
                        spell_id2::BIGINT AS spell_id2, spell_id3::BIGINT AS spell_id3,
                        spell_id4::BIGINT AS spell_id4, gold_min, gold_max,
-                       loot_id, pickpocket_loot_id, skinning_loot_id
+                       loot_id, pickpocket_loot_id, skinning_loot_id,
+                       TRIM(ai_name) AS ai_name, TRIM(script_name) AS script_name,
+                       spell_list_id::BIGINT AS spell_list_id,
+                       detection_range::REAL AS detection_range,
+                       call_for_help_range::REAL AS call_for_help_range,
+                       leash_range::REAL AS leash_range, civilian::BIGINT AS civilian
                FROM world.creature_template
                WHERE patch = 0"#,
         )
@@ -54,6 +59,67 @@ impl CreatureRepository {
         .await
         .context("Failed to load creature class level stats")?;
         Ok(result)
+    }
+
+    /// Load every creature_spells list (eight slots of eleven columns each).
+    pub async fn load_creature_spells(&self) -> Result<Vec<CreatureSpellsListRow>> {
+        use sqlx::Row;
+        const COLUMNS: [&str; 11] = [
+            "spellId",
+            "probability",
+            "castTarget",
+            "targetParam1",
+            "targetParam2",
+            "castFlags",
+            "delayInitialMin",
+            "delayInitialMax",
+            "delayRepeatMin",
+            "delayRepeatMax",
+            "scriptId",
+        ];
+        let mut select = String::from("SELECT entry::BIGINT AS entry");
+        for slot in 1..=8 {
+            for column in COLUMNS {
+                select.push_str(&format!(", \"{column}_{slot}\"::BIGINT AS {column}_{slot}"));
+            }
+        }
+        select.push_str(" FROM world.creature_spells");
+
+        let rows = sqlx::query(&select)
+            .fetch_all(&*self.pool)
+            .await
+            .context("Failed to load creature spell lists")?;
+        let mut lists = Vec::with_capacity(rows.len());
+        for row in rows {
+            let get = |column: &str, slot: u32| -> Result<i64> {
+                Ok(row.try_get::<i64, _>(format!("{column}_{slot}").to_lowercase().as_str())?)
+            };
+            let mut spells = Vec::new();
+            for slot in 1..=8 {
+                let spell_id = get("spellId", slot)?;
+                if spell_id <= 0 {
+                    continue;
+                }
+                spells.push(CreatureSpellRow {
+                    spell_id: spell_id as u32,
+                    probability: get("probability", slot)?.clamp(0, 255) as u8,
+                    cast_target: get("castTarget", slot)?.clamp(0, 255) as u8,
+                    target_param1: get("targetParam1", slot)? as u32,
+                    target_param2: get("targetParam2", slot)? as u32,
+                    cast_flags: get("castFlags", slot)?.clamp(0, u16::MAX as i64) as u16,
+                    delay_initial_min: get("delayInitialMin", slot)? as u32,
+                    delay_initial_max: get("delayInitialMax", slot)? as u32,
+                    delay_repeat_min: get("delayRepeatMin", slot)? as u32,
+                    delay_repeat_max: get("delayRepeatMax", slot)? as u32,
+                    script_id: get("scriptId", slot)? as u32,
+                });
+            }
+            lists.push(CreatureSpellsListRow {
+                entry: row.try_get::<i64, _>("entry")? as u32,
+                spells,
+            });
+        }
+        Ok(lists)
     }
 
     /// Load all creature spawns from database

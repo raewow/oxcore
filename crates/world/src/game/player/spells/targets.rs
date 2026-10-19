@@ -2537,6 +2537,7 @@ mod tests {
             loot_id: 0,
             pickpocket_loot_id: 0,
             skinning_loot_id: 0,
+            ai: Default::default(),
         };
         world.managers.creature_mgr.add_creature(Creature::new(
             guid, entry, 1, position, 0, 0, &template, 1, None,

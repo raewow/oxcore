@@ -38,6 +38,11 @@ pub struct CreatureSnapshot {
     pub unit_class: u8,
     /// Active auras: (spell_id, remaining_ms, stacks)
     pub auras: Vec<(u32, u32, u8)>,
+    /// AI configuration from the template.
+    pub profile: super::types::CreatureAiProfile,
+    pub static_flags1: u32,
+    /// Player or creature that owns this creature (pets, guardians).
+    pub owner: Option<ObjectGuid>,
 }
 
 /// Threat entry in the snapshot
@@ -79,14 +84,6 @@ impl CreatureSnapshot {
         (dx * dx + dy * dy).sqrt()
     }
 
-    /// Get highest threat target
-    pub fn get_top_threat_target(&self) -> Option<ObjectGuid> {
-        self.threat_list
-            .iter()
-            .max_by(|a, b| a.threat.partial_cmp(&b.threat).unwrap())
-            .map(|e| e.target)
-    }
-
     /// Get threat amount for a specific target
     pub fn get_threat(&self, target: ObjectGuid) -> f32 {
         self.threat_list
@@ -119,6 +116,11 @@ pub struct AIInput {
     pub diff_ms: u32,
     /// Snapshots of nearby targets
     pub nearby_targets: Vec<TargetSnapshot>,
+    /// The victim picked from the threat list this update, if any.
+    pub victim: Option<TargetSnapshot>,
+    /// Victim selection found the fight lost (no valid target, or outside the
+    /// threat area): the creature should evade.
+    pub evade_requested: bool,
 }
 
 /// Result of AI decision making

@@ -120,6 +120,122 @@ impl ConditionManager {
                     gameobject.go_state as i32 == entry.values[0]
                 })
                 .unwrap_or(false),
+            1 => has_aura(context.target, entry.values[0] as u32, world),
+            4 => player_zone(context.source, world)
+                .or_else(|| player_zone(context.target, world))
+                .is_some_and(|zone| zone == entry.values[0] as u32),
+            6 => world
+                .managers
+                .player_mgr
+                .with_player(context.target, |p| p.get_team() as i32 == entry.values[0])
+                .unwrap_or(false),
+            8 => world
+                .managers
+                .player_mgr
+                .with_player(context.target, |p| {
+                    p.rewarded_quests.contains(&(entry.values[0] as u32))
+                })
+                .unwrap_or(false),
+            9 => world
+                .managers
+                .player_mgr
+                .with_player(context.target, |p| {
+                    p.active_quests
+                        .iter()
+                        .any(|q| q.quest_id == entry.values[0] as u32)
+                })
+                .unwrap_or(false),
+            12 => world
+                .managers
+                .game_event_mgr
+                .is_active(entry.values[0] as u16),
+            15 => unit_level(context.target, world)
+                .is_some_and(|level| compare(level, entry.values[0], entry.values[1])),
+            20 => nearby_creature(
+                context.target,
+                entry.values[0] as u32,
+                entry.values[1] as f32,
+                entry.values[2] == 0,
+                entry.values[3] != 0,
+                world,
+            ),
+            21 => nearby_gameobject(context.target, entry.values[0] as u32, entry.values[1] as f32, world),
+            24 => compare(
+                world.managers.creature_mgr.get_patch() as i32,
+                entry.values[0],
+                entry.values[1],
+            ),
+            28 => {
+                if entry.values[0] != 0 {
+                    context.target.is_player()
+                        || crate::game::creature::ai::units::resolve_unit(world, context.target)
+                            .is_some_and(|u| u.is_player_controlled())
+                } else {
+                    context.target.is_player()
+                }
+            }
+            33 => object_map(context.source, world)
+                .or_else(|| object_map(context.target, world))
+                .is_some_and(|(map, _)| map == entry.values[0] as u32),
+            34 => object_map(context.source, world)
+                .or_else(|| object_map(context.target, world))
+                .is_some_and(|(map, instance)| {
+                    let value = world
+                        .managers
+                        .lua_mgr
+                        .get_instance_state(map, instance)
+                        .data
+                        .get(&(entry.values[0] as u32))
+                        .copied()
+                        .unwrap_or(0) as i32;
+                    compare(value, entry.values[1], entry.values[2])
+                }),
+            37 => match (object_position(context.source, world), object_position(context.target, world)) {
+                (Some((map, instance, a)), Some((_, _, b))) => world
+                    .managers
+                    .vmap_mgr
+                    .is_in_line_of_sight(map, instance, a, b),
+                _ => false,
+            },
+            38 => match (object_position(context.source, world), object_position(context.target, world)) {
+                (Some((_, _, a)), Some((_, _, b))) => compare(
+                    crate::game::creature::ai::units::distance(&a, &b) as i32,
+                    entry.values[0],
+                    entry.values[1],
+                ),
+                _ => false,
+            },
+            43 => crate::game::creature::ai::units::resolve_unit(world, context.target)
+                .is_some_and(|u| u.in_combat),
+            44 => {
+                let source_faction = crate::game::creature::ai::units::resolve_unit(world, context.source)
+                    .map(|u| u.faction);
+                match (crate::game::creature::ai::units::resolve_unit(world, context.target), source_faction) {
+                    (Some(target), Some(source_faction)) => {
+                        let rank = crate::game::creature::ai::units::reaction_from(
+                            world,
+                            &target,
+                            source_faction,
+                        ) as i32;
+                        compare(rank, entry.values[0], entry.values[1])
+                    }
+                    _ => false,
+                }
+            }
+            46 => crate::game::creature::ai::units::resolve_unit(world, context.target)
+                .is_some_and(|u| u.alive),
+            52 => db_guid(context.source, world)
+                .is_some_and(|guid| guid != 0 && entry.values.iter().any(|v| *v as u32 == guid)),
+            53 => {
+                use chrono::Timelike;
+                let now = chrono::Local::now();
+                let (hour, minute) = (now.hour() as i32, now.minute() as i32);
+                hour >= entry.values[0]
+                    && (hour > entry.values[0] || minute >= entry.values[1])
+                    && hour <= entry.values[2]
+                    && (hour < entry.values[2] || minute <= entry.values[3])
+            }
+            56 => nearby_player(context.target, entry.values[0], entry.values[1] as f32, world),
             _ => {
                 tracing::warn!(
                     condition_id = id,
@@ -175,4 +291,136 @@ fn object_health_percent(guid: ObjectGuid, world: &World) -> Option<u32> {
     } else {
         None
     }
+}
+
+fn has_aura(guid: ObjectGuid, spell_id: u32, world: &World) -> bool {
+    if guid.is_player() {
+        world
+            .managers
+            .player_mgr
+            .with_player(guid, |p| p.auras.container.has_aura(spell_id))
+            .unwrap_or(false)
+    } else {
+        world
+            .managers
+            .creature_mgr
+            .with_creature(guid, |c| c.auras.has_aura(spell_id))
+            .unwrap_or(false)
+    }
+}
+
+fn player_zone(guid: ObjectGuid, world: &World) -> Option<u32> {
+    world.managers.player_mgr.with_player(guid, |p| p.zone_id)
+}
+
+fn unit_level(guid: ObjectGuid, world: &World) -> Option<i32> {
+    crate::game::creature::ai::units::resolve_unit(world, guid).map(|u| u.level as i32)
+}
+
+fn object_position(guid: ObjectGuid, world: &World) -> Option<(u32, u32, oxcore_shared::protocol::Position)> {
+    if guid.is_game_object() {
+        return world
+            .managers
+            .gameobject_mgr
+            .with_gameobject(guid, |go| (go.map_id, go.instance_id, go.position));
+    }
+    crate::game::creature::ai::units::resolve_unit(world, guid)
+        .map(|u| (u.map_id, u.instance_id, u.position))
+}
+
+fn object_map(guid: ObjectGuid, world: &World) -> Option<(u32, u32)> {
+    object_position(guid, world).map(|(map, instance, _)| (map, instance))
+}
+
+fn db_guid(guid: ObjectGuid, world: &World) -> Option<u32> {
+    if guid.is_game_object() {
+        world
+            .managers
+            .gameobject_mgr
+            .with_gameobject(guid, |go| go.spawn_id)
+    } else {
+        world
+            .managers
+            .creature_mgr
+            .with_creature(guid, |c| c.spawn_id)
+    }
+}
+
+fn nearby_creature(
+    around: ObjectGuid,
+    entry: u32,
+    radius: f32,
+    alive_only: bool,
+    exclude_self: bool,
+    world: &World,
+) -> bool {
+    let Some((map_id, instance_id, position)) = object_position(around, world) else {
+        return false;
+    };
+    let Some(map) = world.managers.map_mgr.get_map(map_id, instance_id) else {
+        return false;
+    };
+    map.get_objects_in_range(position, radius)
+        .into_iter()
+        .filter(|g| g.is_creature() && g.entry() == entry && !(exclude_self && *g == around))
+        .any(|g| {
+            world
+                .managers
+                .creature_mgr
+                .with_creature(g, |c| {
+                    (!alive_only || c.is_alive())
+                        && crate::game::creature::ai::units::distance(&c.position, &position)
+                            <= radius
+                })
+                .unwrap_or(false)
+        })
+}
+
+fn nearby_gameobject(around: ObjectGuid, entry: u32, radius: f32, world: &World) -> bool {
+    let Some((map_id, instance_id, position)) = object_position(around, world) else {
+        return false;
+    };
+    let Some(map) = world.managers.map_mgr.get_map(map_id, instance_id) else {
+        return false;
+    };
+    map.get_objects_in_range(position, radius)
+        .into_iter()
+        .filter(|g| g.is_game_object() && g.entry() == entry)
+        .any(|g| {
+            world
+                .managers
+                .gameobject_mgr
+                .with_gameobject(g, |go| {
+                    go.in_world
+                        && crate::game::creature::ai::units::distance(&go.position, &position)
+                            <= radius
+                })
+                .unwrap_or(false)
+        })
+}
+
+/// 0: any player, 1: a player hostile to the searcher, 2: a friendly player.
+fn nearby_player(around: ObjectGuid, mode: i32, radius: f32, world: &World) -> bool {
+    use crate::game::creature::ai::units;
+    use oxcore_shared::game::reputation::ReputationRank;
+    let Some(me) = units::resolve_unit(world, around) else {
+        return false;
+    };
+    let Some(map) = world.managers.map_mgr.get_map(me.map_id, me.instance_id) else {
+        return false;
+    };
+    map.get_players_in_range(me.position, radius)
+        .into_iter()
+        .filter(|g| *g != around)
+        .filter_map(|g| units::resolve_unit(world, g))
+        .filter(|p| p.alive && units::distance(&p.position, &me.position) <= radius)
+        .any(|p| {
+            let reaction = units::reaction_to(world, me.faction, &p);
+            match mode {
+                0 => true,
+                1 => reaction <= ReputationRank::Hostile,
+                2 => reaction >= ReputationRank::Friendly,
+                _ => false,
+            }
+        })
 }

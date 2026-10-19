@@ -15,4 +15,4 @@ pub mod manager;
 pub use assist::AssistThreatHelper;
 pub use calc::ThreatCalcHelper;
 pub use container::ThreatContainer;
-pub use manager::{HostileReference, ThreatManager};
+pub use manager::{HostileReference, ThreatManager, VictimCheck, VictimSelection};

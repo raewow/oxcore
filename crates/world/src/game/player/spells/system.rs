@@ -425,19 +425,12 @@ fn on_spell_launch(
         None => return,
     };
 
-    // Opening a lock game object can pull nearby hostiles onto the opener.
-    if cast_targets.gameobject_target_guid.is_some() && opens_lock(&entry.effect) {
-        if let Some(caster_position) = unit_position(caster_guid, world) {
-            let (x, y, z) = caster_position;
-            let caster_pos = oxcore_shared::protocol::Position::xyz(x, y, z);
-            world.managers.creature_mgr.do_aggro_when_opening(
-                caster_guid,
-                caster_pos,
-                unit_level(caster_guid, world),
-                unit_faction(caster_guid, world),
-                true,
-            );
-        }
+    // Opening a treasure chest can pull nearby hostiles onto the opener.
+    if let Some(object) = cast_targets
+        .gameobject_target_guid
+        .filter(|_| opens_lock(&entry.effect))
+    {
+        crate::game::creature::ai::aggro_on_open(world, caster_guid, object);
     }
 
     let unit_target = match cast_targets.unit_target() {
@@ -4892,6 +4885,7 @@ mod tests {
             loot_id: 0,
             pickpocket_loot_id: 0,
             skinning_loot_id: 0,
+            ai: Default::default(),
         }
     }
 
@@ -5032,16 +5026,77 @@ mod tests {
 
     #[tokio::test]
     async fn on_spell_launch_open_lock_pulls_nearby_hostile_creatures() {
+        use crate::dbc::structures::{FactionTemplateDbcEntry, LockEntry};
+        use oxcore_shared::protocol::Position;
+        const TREASURE_LOCK: u32 = 57;
         let world = launch_test_world();
+        {
+            let mut dbc = world.dbc.write();
+            // A treasure lock: picked with the treasure skill.
+            let mut lock_type = [0; 8];
+            let mut lock_index = [0; 8];
+            lock_type[0] = 2;
+            lock_index[0] = 6;
+            dbc.lock.insert(
+                TREASURE_LOCK,
+                LockEntry {
+                    id: TREASURE_LOCK,
+                    lock_type,
+                    lock_index,
+                    skill: [0; 8],
+                },
+            );
+            // Human players, and monsters hostile to every player.
+            for (id, faction, our, friendly, hostile) in [(1u32, 1u32, 3u32, 2u32, 12u32), (14, 14, 8, 0, 1)] {
+                dbc.faction_template.insert(
+                    id,
+                    FactionTemplateDbcEntry {
+                        id,
+                        faction,
+                        faction_flags: 0,
+                        our_mask: our,
+                        friendly_mask: friendly,
+                        hostile_mask: hostile,
+                        enemy_factions: [0; 4],
+                        friend_factions: [0; 4],
+                    },
+                );
+            }
+        }
         let caster = ObjectGuid::new_player(1);
         let go = ObjectGuid::new_gameobject(1000, 1);
-        let hostile = ObjectGuid::new_creature(14, 1); // faction 14 = Monster
+        let hostile = ObjectGuid::new_creature(14, 1);
         let far_away = ObjectGuid::new_creature(14, 2);
 
         add_launch_player(&world, caster, 0.0);
         add_launch_gameobject(&world, go, 1000);
-        add_launch_creature(&world, hostile, 14, 14, 3.0); // within 10y aggro range
-        add_launch_creature(&world, far_away, 14, 14, 50.0); // outside aggro range
+        // A treasure chest: faction 77 with a treasure lock.
+        world
+            .managers
+            .gameobject_mgr
+            .add_template_for_test(crate::game::gameobject::GameObjectTemplate {
+                entry: 1000,
+                go_type: crate::game::gameobject::GameObjectType::Chest as u32,
+                display_id: 1,
+                name: "Treasure".into(),
+                icon_name: String::new(),
+                cast_bar_caption: String::new(),
+                faction: 77,
+                flags: 0,
+                size: 1.0,
+                data: {
+                    let mut data = [0; 24];
+                    data[0] = TREASURE_LOCK as i32;
+                    data
+                },
+                min_gold: 0,
+                max_gold: 0,
+            });
+        add_launch_creature(&world, hostile, 14, 14, 3.0); // within 10 yards of the chest
+        add_launch_creature(&world, far_away, 14, 14, 50.0); // too far
+        let map = world.managers.map_mgr.get_or_create_map(1, 0);
+        map.add_creature(hostile, Position::new(3.0, 0.0, 0.0, 0.0));
+        map.add_creature(far_away, Position::new(50.0, 0.0, 0.0, 0.0));
 
         let mut spell = charge_spell(40400, [SPELL_EFFECT_OPEN_LOCK, 0, 0]);
         spell.attributes_ex2 = SPELL_ATTR_EX2_ACTIVE_THREAT;
@@ -5052,10 +5107,11 @@ mod tests {
             ..Default::default()
         };
         on_spell_launch(caster, 40400, &targets, &world);
+        crate::game::creature::ai::update_creature_ai(&world).unwrap();
 
         assert!(
             world.managers.creature_mgr.is_in_combat(hostile),
-            "nearby hostile creature must aggro when opener opens a lock GO"
+            "nearby hostile creature must aggro when opener opens a treasure chest"
         );
         assert!(
             !world.managers.creature_mgr.is_in_combat(far_away),

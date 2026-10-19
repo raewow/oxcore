@@ -1010,6 +1010,23 @@ pub async fn apply_target_effects(
         target.miss_condition = SpellHitOutcome::Immune;
     }
 
+    // A creature walking home after a fight evades every spell aimed at it.
+    if target.target_guid != caster_guid
+        && world
+            .managers
+            .creature_mgr
+            .with_creature(target.target_guid, |c| c.is_in_evade_mode())
+            .unwrap_or(false)
+    {
+        world.systems.spells.send_spell_miss(
+            caster_guid,
+            target.target_guid,
+            spell_id,
+            hit::SpellMissInfo::Evade,
+        );
+        return Ok(results);
+    }
+
     // The unit that actually receives the effects. A reflected spell bounces back onto
     // its caster; every other outcome applies to the registered target.
     let mut hit_target_guid = target.target_guid;
@@ -1346,6 +1363,7 @@ mod tests {
             loot_id: 0,
             pickpocket_loot_id: 0,
             skinning_loot_id: 0,
+            ai: Default::default(),
         };
         world.managers.creature_mgr.add_creature(Creature::new(
             guid,

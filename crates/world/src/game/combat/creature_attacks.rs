@@ -29,8 +29,8 @@ pub fn perform_creature_melee_attack(
     creature_guid: ObjectGuid,
     target_guid: ObjectGuid,
 ) {
-    // Only handle creature -> player attacks
     if !target_guid.is_player() {
+        perform_melee_vs_creature(world, creature_guid, target_guid);
         return;
     }
 
@@ -178,6 +178,147 @@ pub fn perform_creature_melee_attack(
     }
 }
 
+/// A creature's swing at another creature (guards against monsters, monsters
+/// against pets and escorts). An evading victim evades the swing; otherwise the
+/// hit table is rolled, the damage applied with threat, and the victim's AI told.
+fn perform_melee_vs_creature(world: &World, creature_guid: ObjectGuid, target_guid: ObjectGuid) {
+    use crate::game::creature::ai::{queue_event, AIEvent};
+    const CREATURE_FLAG_EXTRA_NO_PARRY: u32 = 0x0000_0004;
+
+    let Some((attacker_level, damage_min, damage_max, base_attack_time)) = world
+        .managers
+        .creature_mgr
+        .with_creature_mut(creature_guid, |c| {
+            (c.is_alive() && c.is_attack_ready())
+                .then_some((c.level, c.damage_min, c.damage_max, c.base_attack_time))
+        })
+        .flatten()
+    else {
+        return;
+    };
+    let Some((target_level, target_armor, alive, evading, can_parry)) = world
+        .managers
+        .creature_mgr
+        .with_creature(target_guid, |t| {
+            (
+                t.level,
+                t.armor,
+                t.is_alive(),
+                t.is_in_evade_mode(),
+                !t.ai_profile.has_extra_flag(CREATURE_FLAG_EXTRA_NO_PARRY),
+            )
+        })
+    else {
+        return;
+    };
+    if !alive {
+        return;
+    }
+
+    world
+        .managers
+        .creature_mgr
+        .with_creature_mut(creature_guid, |c| c.reset_attack_timer(base_attack_time));
+
+    if evading {
+        use oxcore_shared::messages::combat::{HitInfo, VictimState};
+        let packet = SmsgAttackerStateUpdate {
+            hit_info: HitInfo::Miss as u32 | HitInfo::SwingNoHitSound as u32,
+            attacker_guid: creature_guid,
+            target_guid,
+            total_damage: 0,
+            damage_school: 0,
+            absorbed: 0,
+            resisted: 0,
+            victim_state: VictimState::Evades as u32,
+            blocked: 0,
+        };
+        broadcast_around_creature(world, creature_guid, &packet);
+        return;
+    }
+
+    let hit_outcome = roll_creature_melee_hit_outcome(attacker_level, target_level, can_parry, false);
+    let base_damage = calculate_melee_damage(attacker_level, damage_min, damage_max, target_armor);
+    let damage = apply_hit_outcome(base_damage, &hit_outcome);
+
+    let timestamp = crate::game::creature::ai::units::now_ms();
+    let (actual_damage, is_dead) = world
+        .managers
+        .creature_mgr
+        .apply_damage(target_guid, damage, creature_guid, timestamp)
+        .unwrap_or((0, false));
+
+    let attack_packet = SmsgAttackerStateUpdate {
+        hit_info: hit_outcome_to_hit_info(&hit_outcome),
+        attacker_guid: creature_guid,
+        target_guid,
+        total_damage: damage,
+        damage_school: 0,
+        absorbed: 0,
+        resisted: 0,
+        victim_state: hit_outcome_to_victim_state(&hit_outcome),
+        blocked: match &hit_outcome {
+            MeleeHitOutcome::Block { blocked_amount } => *blocked_amount,
+            _ => 0,
+        },
+    };
+    broadcast_around_creature(world, creature_guid, &attack_packet);
+
+    if !is_dead {
+        let event = if actual_damage > 0 {
+            AIEvent::DamageTaken {
+                attacker_guid: creature_guid,
+                damage: actual_damage,
+                spell_id: None,
+                school: 0,
+            }
+        } else {
+            AIEvent::AttackedBy {
+                attacker_guid: creature_guid,
+            }
+        };
+        queue_event(world, target_guid, event);
+        if actual_damage > 0 {
+            let _ = crate::handlers::creature_combat::send_health_update(world, target_guid);
+        }
+        return;
+    }
+
+    // Death: stop the fight, mark the victim dead, stop its movement before the
+    // death values reach clients, and tell both AIs.
+    crate::handlers::creature_combat::send_creature_attack_stop(
+        world,
+        creature_guid,
+        target_guid,
+        true,
+    );
+    if let Some(info) = world
+        .managers
+        .creature_mgr
+        .handle_death(target_guid, Some(creature_guid))
+    {
+        world
+            .systems
+            .creature_movement
+            .send_stop_packet(info.guid, info.position, world);
+    }
+    let _ = crate::handlers::creature_combat::send_creature_killed_update(world, target_guid);
+    queue_event(
+        world,
+        target_guid,
+        AIEvent::Died {
+            killer_guid: Some(creature_guid),
+        },
+    );
+    queue_event(
+        world,
+        creature_guid,
+        AIEvent::TargetKilled {
+            victim_guid: target_guid,
+        },
+    );
+}
+
 fn reward_victim_rage_if_actual_damage<F>(actual_damage: u32, mut reward: F)
 where
     F: FnMut(u32),
@@ -238,6 +379,14 @@ fn handle_creature_kill_cleanup(world: &World, player_guid: ObjectGuid, killer_g
                 creature.threat_manager.remove_target(player_guid);
             });
     }
+
+    crate::game::creature::ai::queue_event(
+        world,
+        killer_guid,
+        crate::game::creature::ai::AIEvent::TargetKilled {
+            victim_guid: player_guid,
+        },
+    );
 
     // Send attack stop from killer
     let stop_packet = SmsgAttackStop {

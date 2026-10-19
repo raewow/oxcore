@@ -18,22 +18,26 @@
 
 pub mod aggro;
 mod aggro_scan;
+pub mod assist;
 mod decision;
+pub mod event_ai;
 pub mod executor;
+pub mod script_target;
 mod snapshot;
 mod system;
-mod types;
+pub mod target;
+pub mod types;
+pub mod units;
 
 // Public exports
 pub use aggro::{
-    calculate_aggro_range, is_hostile_faction, is_npc, is_valid_aggro_target,
-    should_aggro_creature, NPC_FLAG_GOSSIP, NPC_FLAG_QUEST_GIVER, NPC_FLAG_TRAINER,
+    attack_distance, is_npc, NPC_FLAG_GOSSIP, NPC_FLAG_QUEST_GIVER, NPC_FLAG_TRAINER,
     NPC_FLAG_VENDOR,
 };
-pub use aggro_scan::scan_for_aggro;
+pub use aggro_scan::{aggro_on_open, scan_for_aggro};
 pub use snapshot::{AIDecisionResult, AIInput, CreatureSnapshot, TargetSnapshot, ThreatEntry};
-pub use system::{process_ai_event, queue_event, update_creature_ai};
+pub use system::{forget_lua_state, process_ai_event, queue_event, update_creature_ai};
 pub use types::{
-    AIAction, AIEvent, AIEventQueue, AIState, AIStateData, AIType, CombatEndReason, MovementType,
-    ReactState,
+    AIAction, AIEvent, AIEventQueue, AIState, AIStateData, AIType, CombatEndReason,
+    CreatureAiProfile, MovementType, PendingAssistance, ReactState,
 };

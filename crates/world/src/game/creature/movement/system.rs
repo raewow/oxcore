@@ -84,6 +84,26 @@ impl MovementSystem {
         );
     }
 
+    /// The point or waypoint a finished spline arrived at, for movement-inform scripts.
+    fn arrived_point(motion_master: &mut super::MotionMaster) -> Option<(u32, u32, u32)> {
+        const WAYPOINT_MOTION_TYPE: u32 = 2;
+        const POINT_MOTION_TYPE: u32 = 9;
+        use crate::game::creature::movement::generators::{
+            PointMovementGenerator, WaypointMovementGenerator,
+        };
+        match motion_master.active_generator() {
+            MovementGeneratorType::Point => motion_master
+                .get_generator_mut(MovementGeneratorType::Point)
+                .and_then(|g| g.as_any_mut().downcast_mut::<PointMovementGenerator>())
+                .map(|p| (POINT_MOTION_TYPE, p.id(), 0)),
+            MovementGeneratorType::Waypoint => motion_master
+                .get_generator_mut(MovementGeneratorType::Waypoint)
+                .and_then(|g| g.as_any_mut().downcast_mut::<WaypointMovementGenerator>())
+                .map(|w| (WAYPOINT_MOTION_TYPE, w.current_point_id(), w.current_script_id())),
+            _ => None,
+        }
+    }
+
     /// Current position and transport of a tracked unit, player or creature.
     fn get_target_movement_state(
         target_guid: ObjectGuid,
@@ -113,6 +133,30 @@ impl MovementSystem {
         diff_ms: u32,
         world: &World,
     ) {
+        // Stunned or rooted creatures stay where they are.
+        let held = world
+            .managers
+            .creature_mgr
+            .with_creature_mut(guid, |creature| {
+                use crate::game::common::unit_flags::{DISABLE_MOVE, STUNNED};
+                if creature.unit_flags & (STUNNED | DISABLE_MOVE) == 0 {
+                    return None;
+                }
+                let was_moving = creature.move_spline.is_active();
+                if was_moving {
+                    creature.position = creature.move_spline.get_position();
+                    creature.move_spline.stop();
+                }
+                Some(was_moving.then_some(creature.position))
+            })
+            .flatten();
+        if let Some(stopped_at) = held {
+            if let Some(position) = stopped_at {
+                self.send_stop_packet(guid, position, world);
+            }
+            return;
+        }
+
         // Update spline position if active
         let spline_finished = world
             .managers
@@ -135,12 +179,35 @@ impl MovementSystem {
 
         // If spline just finished, notify motion master
         if spline_finished == Some(true) {
-            world
+            let reached_point = world
                 .managers
                 .creature_mgr
                 .with_creature_mut(guid, |creature| {
+                    let point = Self::arrived_point(&mut creature.motion_master);
                     creature.motion_master.movement_complete(guid);
-                });
+                    point
+                })
+                .flatten();
+            // Plain script moves use point id u32::MAX and report nothing.
+            if let Some(script_id) = reached_point.map(|(_, _, script)| script).filter(|s| *s != 0) {
+                crate::game::db_scripts::start(
+                    world,
+                    crate::game::db_scripts::ScriptTable::CreatureMovement,
+                    script_id,
+                    Some(guid),
+                    None,
+                );
+            }
+            if let Some((motion_type, point_id, _)) = reached_point.filter(|(_, id, _)| *id != u32::MAX) {
+                crate::game::creature::ai::queue_event(
+                    world,
+                    guid,
+                    crate::game::creature::ai::AIEvent::MovementComplete {
+                        motion_type,
+                        point_id,
+                    },
+                );
+            }
         }
 
         // Snap Z to terrain height during spline movement to prevent floating/sinking

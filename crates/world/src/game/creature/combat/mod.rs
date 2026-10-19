@@ -9,4 +9,7 @@ pub use damage::{
     hit_outcome_to_victim_state, roll_creature_melee_hit_outcome, MeleeHitOutcome,
 };
 pub use state::{CombatState, ThreatEntry};
-pub use threat::{AssistThreatHelper, ThreatCalcHelper, ThreatContainer, ThreatManager};
+pub use threat::{
+    AssistThreatHelper, ThreatCalcHelper, ThreatContainer, ThreatManager, VictimCheck,
+    VictimSelection,
+};

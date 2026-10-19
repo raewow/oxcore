@@ -9,8 +9,6 @@ use crate::core::common::packet::WorldPacketGuidExt;
 use crate::core::lua::{build_player_snapshot, execute_gossip_actions};
 use crate::core::session::WorldSession;
 use crate::game::common::creature_flags::CREATURE_STATIC_FLAG_VISIBLE_TO_GHOSTS;
-use crate::game::common::player_constants::get_faction_for_race;
-use crate::game::creature::ai::is_hostile_faction;
 use crate::game::player::spells::state::CurrentSpellType;
 use crate::World;
 use oxcore_shared::protocol::bitbuf::BitReader;
@@ -137,7 +135,11 @@ pub async fn handle_gossip_hello(
                     return false;
                 }
 
-                if is_hostile_faction(creature.faction, get_faction_for_race(player.race), true) {
+                if crate::game::faction::creature_is_hostile_to_player(
+                    &world.dbc.read(),
+                    creature.faction,
+                    player,
+                ) {
                     return false;
                 }
 

@@ -2,7 +2,7 @@
 //!
 //! Template data lives in CreatureManager.
 
-use super::ai::{AIState, AIStateData};
+use super::ai::{AIState, AIStateData, AIType, CreatureAiProfile};
 use super::combat::{CombatState, ThreatManager};
 use super::death::DeathState;
 use super::manager::{ClassLevelStats, CreatureTemplate};
@@ -11,6 +11,9 @@ use crate::core::common::movement::MovementInfo;
 use crate::game::player::auras::{Aura, AuraContainer};
 use oxcore_shared::protocol::{ObjectGuid, Position};
 use rand::Rng;
+
+/// A respawned creature does not pull anyone for this long (ms).
+pub const RESPAWN_PACIFY_MS: u64 = 5_000;
 
 /// Default pause applied to out-of-combat movement on player interaction (ms).
 pub const NPC_MOVEMENT_PAUSE_TIME: u32 = 180_000;
@@ -137,6 +140,8 @@ pub struct Creature {
     pub ai_state: AIState,
     /// AI state data (cooldowns, timers, etc.)
     pub ai_state_data: AIStateData,
+    /// AI configuration from the template.
+    pub ai_profile: CreatureAiProfile,
 
     // ========== Auras ==========
     /// Active aura effects on this creature.
@@ -195,6 +200,25 @@ impl Creature {
             guid.entry(),
             entry
         );
+
+        let ai_profile = CreatureAiProfile {
+            ai_type: AIType::select(
+                &template.ai.ai_name,
+                template.creature_type,
+                template.flags_extra,
+                false,
+            ),
+            flags_extra: template.flags_extra,
+            static_flags2: template.ai.static_flags2,
+            spell_list_id: template.ai.spell_list_id,
+            detection_range: template.ai.detection_range,
+            call_for_help_range: template.ai.call_for_help_range,
+            leash_range: template.ai.leash_range,
+            civilian: template.ai.civilian,
+        };
+        let mut ai_state_data = AIStateData::new();
+        ai_state_data.reset_combat_toggles(template.static_flags1);
+        ai_state_data.react_state = ai_profile.initial_react_state(template.static_flags1);
 
         Self {
             // Identity
@@ -262,7 +286,8 @@ impl Creature {
 
             // AI
             ai_state: AIState::Idle,
-            ai_state_data: AIStateData::new(),
+            ai_state_data,
+            ai_profile,
 
             // Movement
             auras: AuraContainer::new(),
@@ -288,6 +313,26 @@ impl Creature {
         self.speed_run * 7.0
     }
 
+    /// Walking home after a fight: hits show EVADE and do not pull it back.
+    pub fn is_in_evade_mode(&self) -> bool {
+        matches!(self.ai_state, AIState::Evading | AIState::Returning)
+    }
+
+    /// Stunned, confused or fleeing: it cannot pick targets or swing.
+    pub fn cannot_react(&self) -> bool {
+        use crate::game::common::unit_flags::{CONFUSED, FLEEING, STUNNED};
+        self.unit_flags & (STUNNED | CONFUSED | FLEEING) != 0
+    }
+
+    /// Whether it may swing at its victim now.
+    pub fn can_melee(&self) -> bool {
+        use crate::game::common::unit_flags::PACIFIED;
+        self.is_alive()
+            && self.ai_state_data.melee_enabled
+            && !self.cannot_react()
+            && self.unit_flags & PACIFIED == 0
+    }
+
     /// Check if creature is alive
     pub fn is_alive(&self) -> bool {
         self.current_health > 0
@@ -295,8 +340,17 @@ impl Creature {
 
     /// Apply damage to creature, returns actual damage dealt
     pub fn take_damage(&mut self, damage: u32) -> u32 {
-        let actual_damage = damage.min(self.current_health);
-        self.current_health = self.current_health.saturating_sub(damage);
+        // Unkillable creatures stop at 1 health, scripted invincibility at its threshold.
+        let floor = if self.static_flags1
+            & crate::game::common::creature_flags::CREATURE_STATIC_FLAG_UNKILLABLE
+            != 0
+        {
+            self.ai_state_data.invincibility_hp.max(1)
+        } else {
+            self.ai_state_data.invincibility_hp
+        };
+        let actual_damage = damage.min(self.current_health.saturating_sub(floor));
+        self.current_health -= actual_damage;
         actual_damage
     }
 
@@ -507,6 +561,24 @@ impl Creature {
         self.ai_state = AIState::Idle;
         self.combat.leave_combat();
         self.threat_manager.clear();
+        // A fresh AI: template spell list, melee, combat movement and react state,
+        // and five seconds before it may pull anyone.
+        let spells: Vec<_> = self
+            .ai_state_data
+            .spells_list
+            .iter()
+            .map(|s| s.inner.clone())
+            .collect();
+        let mut ai_state_data = AIStateData::new();
+        ai_state_data.reset_combat_toggles(self.static_flags1);
+        ai_state_data.react_state = self.ai_profile.initial_react_state(self.static_flags1);
+        ai_state_data.set_spells_list(spells);
+        ai_state_data.pacified_until_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0)
+            + RESPAWN_PACIFY_MS;
+        self.ai_state_data = ai_state_data;
         self.corpse_decay_timer = 0;
         self.respawn_time = 0;
         self.loot_recipient = None;
@@ -593,6 +665,7 @@ mod tests {
             loot_id: 0,
             pickpocket_loot_id: 0,
             skinning_loot_id: 0,
+            ai: Default::default(),
         }
     }
 

@@ -118,6 +118,33 @@ pub async fn execute_pending_attack_vs_creature(
         return Ok(true);
     }
 
+    // A creature walking home after a fight evades the swing: no damage, no threat,
+    // and it does not turn around.
+    if world
+        .managers
+        .creature_mgr
+        .with_creature(target_guid, |c| c.is_in_evade_mode())
+        .unwrap_or(false)
+    {
+        use oxcore_shared::messages::combat::{HitInfo, VictimState};
+        let packet = SmsgAttackerStateUpdate {
+            hit_info: HitInfo::Miss as u32 | HitInfo::SwingNoHitSound as u32,
+            attacker_guid,
+            target_guid,
+            total_damage: 0,
+            damage_school: 0,
+            absorbed: 0,
+            resisted: 0,
+            victim_state: VictimState::Evades as u32,
+            blocked: 0,
+        };
+        world
+            .managers
+            .broadcast_mgr
+            .broadcast_msg_nearby(attacker_guid, &packet, true);
+        return Ok(false);
+    }
+
     // Starting auto-attack only arms the swing timer. Combat begins when the
     // first swing is actually attempted, after the range check in the update loop.
     world
@@ -502,7 +529,7 @@ fn send_attacker_state_update(
 }
 
 /// Send health update for creature
-fn send_health_update(world: &World, creature_guid: ObjectGuid) -> anyhow::Result<()> {
+pub(crate) fn send_health_update(world: &World, creature_guid: ObjectGuid) -> anyhow::Result<()> {
     if let Some((current, max)) = world.managers.creature_mgr.get_health(creature_guid) {
         tracing::debug!(
             "[COMBAT] send_health_update {:?}: health={}/{}",
@@ -527,7 +554,10 @@ fn send_health_update(world: &World, creature_guid: ObjectGuid) -> anyhow::Resul
 /// Only sends health=0 + stand_state=7 + clear target/flags.
 /// Does NOT set UNIT_DYNFLAG_DEAD on real death (only feign death).
 /// UNIT_DYNFLAG_LOOTABLE is set separately after loot generation.
-fn send_creature_killed_update(world: &World, creature_guid: ObjectGuid) -> anyhow::Result<()> {
+pub(crate) fn send_creature_killed_update(
+    world: &World,
+    creature_guid: ObjectGuid,
+) -> anyhow::Result<()> {
     let (max_health, unit_flags) = world
         .managers
         .creature_mgr
@@ -594,7 +624,7 @@ fn send_attack_stop_to_player(
 }
 
 /// Send attack stop from a creature (uses creature position for broadcast)
-fn send_creature_attack_stop(
+pub(crate) fn send_creature_attack_stop(
     world: &World,
     creature_guid: ObjectGuid,
     target: ObjectGuid,

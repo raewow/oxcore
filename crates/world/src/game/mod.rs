@@ -9,6 +9,8 @@ pub mod coordination;
 pub mod corpse;
 pub mod game_event;
 pub mod creature;
+pub mod db_scripts;
+pub mod faction;
 pub mod gameobject;
 pub mod grid_system;
 pub mod group;

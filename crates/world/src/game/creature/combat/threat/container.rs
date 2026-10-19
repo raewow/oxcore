@@ -137,6 +137,31 @@ impl ThreatContainer {
         list
     }
 
+    /// Overwrite a target's threat; no-op when the target is not on the list.
+    pub fn set_threat(&mut self, target: ObjectGuid, threat: f32) {
+        if let Some(reference) = self.find_reference_mut(target) {
+            reference.threat = threat;
+            self.dirty = true;
+        }
+    }
+
+    /// Online targets with their effective threat (base plus taunt), best first.
+    pub fn sorted_online(&mut self) -> Vec<(ObjectGuid, f32)> {
+        if self.dirty {
+            self.sort_references();
+            self.dirty = false;
+        }
+        self.online_refs
+            .iter()
+            .map(|r| (r.target, r.threat + r.temp_threat_modifier))
+            .collect()
+    }
+
+    /// Targets on the online list.
+    pub fn online_targets(&self) -> Vec<ObjectGuid> {
+        self.online_refs.iter().map(|r| r.target).collect()
+    }
+
     /// Set temporary threat modifier (used for taunt)
     pub fn set_temp_threat_modifier(&mut self, target: ObjectGuid, modifier: f32) {
         if let Some(ref_mut) = self.find_reference_mut(target) {

@@ -424,6 +424,38 @@ impl World {
             }
         }
 
+        // Creature linking: spawns and entries that react to their master.
+        {
+            use crate::game::coordination::LinkingRepository;
+            let repo = LinkingRepository::new(self.databases.world.clone());
+            match (repo.load_all_links().await, repo.load_all_entry_links().await) {
+                (Ok(links), Ok(entry_links)) => {
+                    self.managers.linking_mgr.load_from_repository(links);
+                    self.managers.linking_mgr.load_entry_links(entry_links);
+                    tracing::info!(
+                        "Loaded {} creature links",
+                        self.managers.linking_mgr.link_count()
+                    );
+                }
+                (Err(e), _) | (_, Err(e)) => {
+                    tracing::error!("Failed to load creature linking: {} (linking disabled)", e);
+                }
+            }
+        }
+
+        match crate::game::db_scripts::load(&self.databases.world).await {
+            Ok(count) => tracing::info!("Loaded {} database script steps", count),
+            Err(e) => tracing::error!("Failed to load database scripts: {}", e),
+        }
+        match crate::game::creature::ai::event_ai::load(&self.databases.world).await {
+            Ok(count) => tracing::info!("Loaded {} EventAI events", count),
+            Err(e) => tracing::error!("Failed to load EventAI events: {}", e),
+        }
+        match crate::game::creature::formation::load(&self.databases.world).await {
+            Ok(count) => tracing::info!("Loaded {} creature group members", count),
+            Err(e) => tracing::error!("Failed to load creature groups: {} (groups disabled)", e),
+        }
+
         // Load zone weather chances (`game_weather`)
         if let Err(e) = self
             .systems
@@ -629,6 +661,13 @@ impl World {
         // Process AI updates (after combat timers so AI sees current timer state)
         crate::game::creature::ai::update_creature_ai(self)?;
 
+        // Scheduled database script steps.
+        crate::game::db_scripts::process(self);
+
+        // Temporary summons despawn on their own schedule.
+        crate::game::creature::summon::update_summons(self, diff_ms);
+        crate::game::creature::summon::update_temporary_gameobjects(self, diff_ms);
+
         // Process creature regeneration (health + mana)
         crate::game::creature::regen::update_regeneration(self, diff_ms);
         let creatures_ms = phase_creatures.elapsed().as_secs_f64() * 1000.0;
@@ -678,6 +717,8 @@ impl World {
             }
             // World events starting or stopping add or remove their spawns.
             crate::game::game_event::update(self);
+            // Formation members fall in behind their leaders.
+            crate::game::creature::formation::update_formations(self);
         }
 
         self.session_mgr.update_logout_timers(self).await?;

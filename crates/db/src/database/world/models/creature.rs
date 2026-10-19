@@ -50,6 +50,13 @@ pub struct CreatureTemplateRow {
     pub loot_id: i64,
     pub pickpocket_loot_id: i64,
     pub skinning_loot_id: i64,
+    pub ai_name: String,
+    pub script_name: String,
+    pub spell_list_id: i64,
+    pub detection_range: f32,
+    pub call_for_help_range: f32,
+    pub leash_range: f32,
+    pub civilian: i64,
 }
 
 /// Row from creature_classlevelstats table - base stats per class and level
@@ -89,4 +96,27 @@ pub struct CreatureSpawnRow {
     pub entry_pool_entry: i64, // pool entry for this entry
     pub patch_min: i64,
     pub patch_max: i64,
+}
+
+/// One spell slot of a creature_spells list.
+#[derive(Debug, Clone)]
+pub struct CreatureSpellRow {
+    pub spell_id: u32,
+    pub probability: u8,
+    pub cast_target: u8,
+    pub target_param1: u32,
+    pub target_param2: u32,
+    pub cast_flags: u16,
+    pub delay_initial_min: u32,
+    pub delay_initial_max: u32,
+    pub delay_repeat_min: u32,
+    pub delay_repeat_max: u32,
+    pub script_id: u32,
+}
+
+/// A creature_spells list: up to eight spells cast in combat.
+#[derive(Debug, Clone)]
+pub struct CreatureSpellsListRow {
+    pub entry: u32,
+    pub spells: Vec<CreatureSpellRow>,
 }
