@@ -40,6 +40,8 @@ pub struct GuildSystem {
     next_guild_id: AtomicU32,
 
     repository: Arc<dyn GuildRepositoryTrait>,
+    /// Guild charters on their way to becoming guilds.
+    pub petitions: super::petition::Petitions,
     broadcast_mgr: Arc<dyn BroadcastManagerTrait>,
     player_mgr: Arc<PlayerManager>,
     item_mgr: Arc<ItemManager>,
@@ -58,10 +60,54 @@ impl GuildSystem {
             pending_invites: DashMap::new(),
             next_guild_id: AtomicU32::new(1),
             repository,
+            petitions: Default::default(),
             broadcast_mgr,
             player_mgr,
             item_mgr,
         }
+    }
+
+    /// The guild whose tabard `player` may redesign: their own, if they lead it.
+    pub fn emblem_guild(
+        &self,
+        player: ObjectGuid,
+    ) -> std::result::Result<u32, oxcore_shared::messages::petition::GuildEmblemResult> {
+        use oxcore_shared::messages::petition::GuildEmblemResult;
+        let guild_id = self
+            .get_player_guild(player)
+            .and_then(|state| state.guild_id)
+            .ok_or(GuildEmblemResult::NoGuild)?;
+        let leader = self
+            .guilds
+            .get(&guild_id)
+            .map(|g| g.info.leader_guid)
+            .ok_or(GuildEmblemResult::NoGuild)?;
+        if leader != player {
+            return Err(GuildEmblemResult::NotGuildMaster);
+        }
+        Ok(guild_id)
+    }
+
+    /// Store a guild's new tabard design.
+    pub async fn set_emblem(
+        &self,
+        guild_id: u32,
+        emblem: GuildEmblem,
+    ) -> Result<()> {
+        if let Some(mut guild) = self.guilds.get_mut(&guild_id) {
+            guild.info.emblem = emblem.clone();
+        }
+        self.repository
+            .update_emblem(
+                guild_id,
+                i32::from(emblem.style),
+                i32::from(emblem.color),
+                i32::from(emblem.border_style),
+                i32::from(emblem.border_color),
+                i32::from(emblem.background_color),
+            )
+            .await?;
+        Ok(())
     }
 
     /// Initialize system (load next guild ID from database)

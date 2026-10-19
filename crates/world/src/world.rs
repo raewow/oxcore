@@ -571,6 +571,15 @@ impl World {
         self.systems
             .gossip_manager
             .drop_missing_conditions(&self.managers.condition_mgr);
+        if let Err(e) = self
+            .systems
+            .guild
+            .petitions
+            .load(&self.databases.character)
+            .await
+        {
+            tracing::error!("Failed to load guild charters: {e:#}");
+        }
 
         // Load graveyard data (needs both DBC and world DB)
         {

@@ -10,7 +10,7 @@
 //! - [`SmsgTurnInPetitionResults`] - Result of turning in a completed charter
 //! - [`SmsgPetitionQueryResponse`] - Response to a petition query with charter details
 
-use crate::game::petition::{PetitionResult, PetitionSignature};
+use crate::game::petition::{PetitionResult, PetitionSignature, GUILD_CHARTER_SIGNATURES};
 use crate::messages::update::DEFAULT_REALM_ID;
 use crate::messages::ToWorldPacket;
 use crate::protocol::bitbuf::BitWriter;
@@ -20,69 +20,32 @@ use crate::protocol::WorldPacket;
 
 // ========== MODERN ENCODING HELPERS ==========
 
-/// Signatures a Classic guild charter needs before it can be turned in.
+/// A signing outcome as the 1.14 sign-result enum numbers it: `Ok` 0, `AlreadySigned` 1,
+/// `AlreadyInGuild` 2, `CantSignOwn` 3, `NotServer` 5. "Needs more signatures" is not a signing
+/// outcome; it folds onto the generic refusal.
 ///
-/// 1.12 sends zero here and lets the client apply the rule it already knows; 1.14 reads the number
-/// off the wire and shows "0 of 0 signatures" if it is not told.
-const GUILD_CHARTER_SIGNATURES: u32 = 9;
-
-/// A signing outcome as the 1.14 sign-result enum numbers it.
-///
-/// Three enums are in play and no two agree. 1.12's wire enum, 1.14's, and the one this server
-/// actually uses — which matches neither, most visibly on "already in a guild": 6 here, 2 on both
-/// wires. So this cannot be a cast in either direction; it is a translation by meaning.
-///
-/// The 1.14 codes are: `Ok` 0, `AlreadySigned` 1, `AlreadyInGuild` 2, `CantSignOwn` 3,
-/// `NotServer` 5, `Full` 8, `AlreadySignedOther` 10, `RestrictedAccountTrial` 11,
-/// `HasRestriction` 13. Several server-side outcomes — a charter or a signature that does not
-/// exist, a player who could not be found — have no 1.14 code at all and fold onto the generic
-/// `NotServer` refusal, which is the client's "petition failed" wording.
-///
-/// Exhaustive with no catch-all so that adding an outcome is a compile error rather than a silent
-/// "petition failed".
-///
-/// The result rides in a **4-bit** field, so every value here must stay under 16; a larger one
-/// would be truncated into a different, valid-looking code.
+/// The result rides in a **4-bit** field, so every value here must stay under 16.
 fn modern_sign_result(result: PetitionResult) -> u32 {
     match result {
         PetitionResult::Ok => 0,
         PetitionResult::AlreadySigned => 1,
         PetitionResult::AlreadyInGuild => 2,
-        // Nearest 1.14 wording: you may not put your own name on this charter.
-        PetitionResult::CannotSignSameGuild => 3,
-        PetitionResult::TooManySignatures => 8, // Full
-        PetitionResult::NotEligible => 13,      // HasRestriction
-        // No 1.14 counterpart -- generic refusal.
-        PetitionResult::NoSignature
-        | PetitionResult::NoSuchPetition
-        | PetitionResult::NoSuchPetitionSignature
-        | PetitionResult::PlayerNotFound => 5,
+        PetitionResult::CantSignOwn => 3,
+        PetitionResult::NeedMoreSignatures | PetitionResult::NotServer => 5,
     }
 }
 
-/// A turn-in outcome as the 1.14 turn-in enum numbers it.
-///
-/// A *different* enum from the signing one despite both being petition results and both riding in
-/// a 4-bit field: 1.14 uses `Ok` 0, `AlreadyInGuild` 2, `NeedMoreSignatures` 4,
-/// `GuildPermissions` 11, `GuildNameInvalid` 12, `HasRestriction` 13. Note that 4 means "not
-/// enough signatures" here and nothing at all when signing — feeding a sign result into a turn-in
-/// reply produces a wrong but entirely plausible error message.
-///
-/// Exhaustive with no catch-all for the same reason as [`modern_sign_result`].
+/// A turn-in outcome as the 1.14 turn-in enum numbers it — a *different* enum from the signing
+/// one: `Ok` 0, `AlreadyInGuild` 2, `NeedMoreSignatures` 4, `HasRestriction` 13. Feeding a sign
+/// result into a turn-in reply produces a wrong but plausible error message.
 fn modern_turn_in_result(result: PetitionResult) -> u32 {
     match result {
         PetitionResult::Ok => 0,
         PetitionResult::AlreadyInGuild => 2,
-        // Turning in an unsigned charter is exactly "needs more signatures".
-        PetitionResult::NoSignature => 4,
-        // No 1.14 counterpart -- generic refusal.
-        PetitionResult::AlreadySigned
-        | PetitionResult::TooManySignatures
-        | PetitionResult::NoSuchPetition
-        | PetitionResult::NoSuchPetitionSignature
-        | PetitionResult::CannotSignSameGuild
-        | PetitionResult::PlayerNotFound
-        | PetitionResult::NotEligible => 13, // HasRestriction
+        PetitionResult::NeedMoreSignatures => 4,
+        PetitionResult::AlreadySigned | PetitionResult::CantSignOwn | PetitionResult::NotServer => {
+            13
+        }
     }
 }
 
@@ -107,7 +70,7 @@ impl ToWorldPacket for SmsgPetitionShowlist {
         packet.write_u8(1); // amount_of_petitions - always 1 for guild charters in Vanilla
 
         // Petition info (Vanilla 1.12.1 format - no signatures_required field)
-        packet.write_u32(0); // index - always 0 for first/only petition
+        packet.write_u32(1); // index of the one charter on offer
         packet.write_u32(CHARTER_ENTRY_GENERIC); // charter_entry - 5863
         packet.write_u32(CHARTER_DISPLAY_ID); // charter_display_id - 16161
         packet.write_u32(CHARTER_COST); // guild_charter_cost - 1000 copper (10 silver)
@@ -216,8 +179,8 @@ impl ToWorldPacket for SmsgPetitionShowSignatures<'_> {
 pub struct SmsgPetitionSignResults {
     /// GUID of the charter item
     pub charter_guid: ObjectGuid,
-    /// GUID of the charter owner
-    pub owner_guid: ObjectGuid,
+    /// GUID of the player who signed
+    pub player_guid: ObjectGuid,
     /// Result of the signature attempt
     pub result: PetitionResult,
 }
@@ -227,7 +190,7 @@ impl ToWorldPacket for SmsgPetitionSignResults {
         let mut packet = WorldPacket::new(Opcode::SMSG_PETITION_SIGN_RESULTS);
 
         packet.write_guid_raw(self.charter_guid.raw()); // Charter item GUID
-        packet.write_guid_raw(self.owner_guid.raw()); // Owner GUID
+        packet.write_guid_raw(self.player_guid.raw()); // Signer GUID
         packet.write_u32(self.result.as_u32()); // Result code
 
         packet
@@ -242,7 +205,7 @@ impl ToWorldPacket for SmsgPetitionSignResults {
         let mut writer = BitWriter::new();
         let (high, low) = self.charter_guid.to_guid128(DEFAULT_REALM_ID);
         writer.write_packed_guid_128(high, low); // Item
-        let (high, low) = self.owner_guid.to_guid128(DEFAULT_REALM_ID);
+        let (high, low) = self.player_guid.to_guid128(DEFAULT_REALM_ID);
         writer.write_packed_guid_128(high, low); // Player
         writer.write_bits(modern_sign_result(self.result), 4);
         writer.flush_bits();
@@ -298,14 +261,19 @@ impl ToWorldPacket for SmsgPetitionQueryResponse<'_> {
         packet.write_guid_raw(self.owner_guid.raw()); // Charter owner GUID
         packet.write_string(self.guild_name); // Guild name
         packet.write_string(""); // Body text (empty for guild charters)
-        packet.write_u32(0); // Signatures required (0 in Vanilla - client knows it's 9)
-        packet.write_u32(0); // Unknown flags
-        packet.write_u32(0); // Unknown
-        packet.write_u32(0); // Unknown
-        packet.write_u32(0); // Unknown
-        packet.write_u32(0); // Unknown
-        packet.write_u16(0); // Unknown
-        packet.write_u32(0); // Type (0 = guild)
+        packet.write_u32(1); // Flags
+        packet.write_u32(GUILD_CHARTER_SIGNATURES); // Minimum signatures
+        packet.write_u32(GUILD_CHARTER_SIGNATURES); // Maximum signatures
+        packet.write_u32(0); // Deadline
+        packet.write_u32(0); // Issue date
+        packet.write_u32(0); // Allowed guild
+        packet.write_u32(0); // Allowed classes
+        packet.write_u32(0); // Allowed races
+        packet.write_u16(0); // Allowed gender
+        packet.write_u32(0); // Allowed minimum level
+        packet.write_u32(0); // Allowed maximum level
+        packet.write_u32(0); // Choice count
+        packet.write_u32(0); // Default choice
 
         packet
     }
@@ -362,6 +330,90 @@ impl ToWorldPacket for SmsgPetitionQueryResponse<'_> {
     }
 }
 
+/// MSG_PETITION_RENAME - the charter's guild name was changed.
+#[derive(Debug, Clone)]
+pub struct MsgPetitionRename<'a> {
+    pub charter_guid: ObjectGuid,
+    pub new_name: &'a str,
+}
+
+impl ToWorldPacket for MsgPetitionRename<'_> {
+    fn to_vanilla(&self) -> WorldPacket {
+        let mut packet = WorldPacket::new(Opcode::MSG_PETITION_RENAME);
+        packet.write_guid_raw(self.charter_guid.raw());
+        packet.write_string(self.new_name);
+        packet
+    }
+
+    /// `SMSG_PETITION_RENAME_GUILD_RESPONSE` in 1.14: the GUID packed, then the name behind a
+    /// 7-bit length.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.charter_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+        let name = self.new_name.as_bytes();
+        writer.write_bits(name.len() as u32, 7);
+        writer.flush_bits();
+        writer.write_bytes(name);
+        Some(writer.finish(Opcode::SMSG_PETITION_RENAME_GUILD_RESPONSE))
+    }
+}
+
+/// MSG_PETITION_DECLINE - tells a charter's owner that a player would not sign it.
+#[derive(Debug, Clone)]
+pub struct MsgPetitionDecline<'a> {
+    pub player_guid: ObjectGuid,
+    /// The decliner's name, for the 1.14 client.
+    pub player_name: &'a str,
+}
+
+impl ToWorldPacket for MsgPetitionDecline<'_> {
+    fn to_vanilla(&self) -> WorldPacket {
+        let mut packet = WorldPacket::new(Opcode::MSG_PETITION_DECLINE);
+        packet.write_guid_raw(self.player_guid.raw());
+        packet
+    }
+
+    /// 1.14 has no decline notice, so the owner reads it as a system message.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let text = format!("{} has declined your guild invitation.", self.player_name);
+        crate::messages::chat::SmsgMessageChat::system(ObjectGuid::empty(), &text).to_modern()
+    }
+}
+
+/// Result of saving a guild tabard design, numbered as both clients read it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GuildEmblemResult {
+    Success = 0,
+    InvalidTabardColors = 1,
+    NoGuild = 2,
+    NotGuildMaster = 3,
+    NotEnoughMoney = 4,
+    /// Fails without telling the player why (not at a tabard designer).
+    FailNoMessage = 5,
+}
+
+/// MSG_SAVE_GUILD_EMBLEM - the result of saving a tabard design.
+#[derive(Debug, Clone)]
+pub struct MsgSaveGuildEmblem {
+    pub result: GuildEmblemResult,
+}
+
+impl ToWorldPacket for MsgSaveGuildEmblem {
+    fn to_vanilla(&self) -> WorldPacket {
+        let mut packet = WorldPacket::new(Opcode::MSG_SAVE_GUILD_EMBLEM);
+        packet.write_u32(self.result as u32);
+        packet
+    }
+
+    /// `SMSG_PLAYER_SAVE_GUILD_EMBLEM` in 1.14: the same u32 result.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        writer.write_u32(self.result as u32);
+        Some(writer.finish(Opcode::SMSG_PLAYER_SAVE_GUILD_EMBLEM))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -383,14 +435,10 @@ mod tests {
             PetitionSignature {
                 player_guid: ObjectGuid::from_low(123),
                 player_account: 1,
-                name: String::new(),
-                offer_result: PetitionResult::Ok,
             },
             PetitionSignature {
                 player_guid: ObjectGuid::from_low(456),
                 player_account: 2,
-                name: String::new(),
-                offer_result: PetitionResult::Ok,
             },
         ];
 
@@ -409,7 +457,7 @@ mod tests {
     fn test_smsg_petition_sign_results() {
         let msg = SmsgPetitionSignResults {
             charter_guid: ObjectGuid::from_low(123),
-            owner_guid: ObjectGuid::from_low(456),
+            player_guid: ObjectGuid::from_low(456),
             result: PetitionResult::Ok,
         };
         let packet = msg.to_vanilla();
@@ -434,5 +482,32 @@ mod tests {
         };
         let packet = msg.to_vanilla();
         assert_eq!(packet.opcode(), Opcode::SMSG_PETITION_QUERY_RESPONSE);
+    }
+
+    #[test]
+    fn vanilla_sign_results_use_the_client_codes() {
+        let msg = SmsgPetitionSignResults {
+            charter_guid: ObjectGuid::from_low(1),
+            player_guid: ObjectGuid::from_low(2),
+            result: PetitionResult::CantSignOwn,
+        };
+        let packet = msg.to_vanilla();
+        assert_eq!(&packet.data()[16..20], &3u32.to_le_bytes());
+    }
+
+    #[test]
+    fn vanilla_query_response_carries_signature_counts() {
+        let msg = SmsgPetitionQueryResponse {
+            petition_guid: 7,
+            owner_guid: ObjectGuid::from_low(9),
+            guild_name: "A",
+        };
+        let packet = msg.to_vanilla();
+        let data = packet.data();
+        // id(4) owner(8) "A\0"(2) ""(1) flags(4) min(4) max(4)
+        assert_eq!(&data[15..19], &1u32.to_le_bytes());
+        assert_eq!(&data[19..23], &9u32.to_le_bytes());
+        assert_eq!(&data[23..27], &9u32.to_le_bytes());
+        assert_eq!(data.len(), 15 + 4 * 8 + 2 + 4 * 4);
     }
 }

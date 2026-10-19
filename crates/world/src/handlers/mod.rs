@@ -27,6 +27,7 @@ pub mod loot;
 pub mod mail;
 pub mod movement;
 pub mod pet_action;
+pub mod petition;
 pub mod player_handler;
 pub mod query;
 pub mod quest_handler;
@@ -187,6 +188,35 @@ pub async fn dispatch_packet(
                 }
                 Opcode::CMSG_GUILD_CREATE => {
                     guild::handle_guild_create(session, packet, world).await?;
+                }
+
+                // Guild charters and tabards
+                Opcode::CMSG_PETITION_BUY => {
+                    petition::handle_petition_buy(session, packet, world).await?;
+                }
+                Opcode::CMSG_PETITION_SHOW_SIGNATURES => {
+                    petition::handle_petition_show_signatures(session, packet, world).await?;
+                }
+                Opcode::CMSG_PETITION_QUERY => {
+                    petition::handle_petition_query(session, packet, world).await?;
+                }
+                Opcode::MSG_PETITION_RENAME => {
+                    petition::handle_petition_rename(session, packet, world).await?;
+                }
+                Opcode::CMSG_PETITION_SIGN => {
+                    petition::handle_petition_sign(session, packet, world).await?;
+                }
+                Opcode::MSG_PETITION_DECLINE => {
+                    petition::handle_petition_decline(session, packet, world).await?;
+                }
+                Opcode::CMSG_OFFER_PETITION => {
+                    petition::handle_offer_petition(session, packet, world).await?;
+                }
+                Opcode::CMSG_TURN_IN_PETITION => {
+                    petition::handle_turn_in_petition(session, packet, world).await?;
+                }
+                Opcode::MSG_SAVE_GUILD_EMBLEM => {
+                    petition::handle_save_guild_emblem(session, packet, world).await?;
                 }
                 Opcode::CMSG_GUILD_INVITE => {
                     guild::handle_guild_invite(session, packet, world).await?;

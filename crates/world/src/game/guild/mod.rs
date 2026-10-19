@@ -17,6 +17,7 @@
 //! - Roster broadcasting to all members
 //! - Guild info queries
 
+pub mod petition;
 mod system;
 pub mod utils;
 

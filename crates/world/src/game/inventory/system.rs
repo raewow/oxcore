@@ -268,6 +268,25 @@ impl InventorySystem {
         self.broadcast_mgr.send_msg_to_player(player_guid, msg);
     }
 
+    /// Tell the owner what enchantment `slot` of an item now holds.
+    fn send_item_enchantment_update(
+        &self,
+        player_guid: ObjectGuid,
+        item_guid: ObjectGuid,
+        slot: u32,
+        (enchant_id, duration, charges): (u32, u32, u32),
+    ) {
+        use oxcore_shared::protocol::update_fields::ITEM_FIELD_ENCHANTMENT;
+        let field = ITEM_FIELD_ENCHANTMENT + slot * 3;
+        let msg = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(
+            ValuesUpdateBlock::new(item_guid, ObjectType::Item)
+                .set_field(field, enchant_id)
+                .set_field(field + 1, duration)
+                .set_field(field + 2, charges),
+        ));
+        self.broadcast_mgr.send_msg_to_player(player_guid, msg);
+    }
+
     fn send_item_count_update(&self, player_guid: ObjectGuid, item_guid: ObjectGuid, count: u32) {
         let msg = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(
             ValuesUpdateBlock::new(item_guid, ObjectType::Item)
@@ -2258,7 +2277,7 @@ impl InventorySystem {
 
         let mut item_write = item.write();
 
-        if slot as usize >= item_write.enchantments.len() {
+        if slot as usize >= oxcore_shared::game::inventory::MAX_ENCHANTMENT_SLOT {
             return EnchantResult::InvalidSlot;
         }
 
@@ -2281,6 +2300,7 @@ impl InventorySystem {
             return EnchantResult::DatabaseError(e.to_string());
         }
 
+        self.send_item_enchantment_update(player_guid, item_guid, slot, (enchantment_id, 0, 0));
         self.send_slot_update(player_guid, bag, slot_num, Some(item_guid));
 
         if self.cache.is_equipment_slot(player_guid, slot_num) {

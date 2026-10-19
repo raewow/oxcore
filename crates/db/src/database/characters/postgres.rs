@@ -2126,6 +2126,45 @@ impl PgPetitionRepository {
             .context("Failed to add PostgreSQL petition signature")
             .map(|_| ())
     }
+    /// Every charter with its owner's race, for which side may sign it.
+    pub async fn load_all_petitions(&self) -> Result<Vec<(PgPetitionRow, i16)>> {
+        let rows: Vec<(i64, i64, Option<i64>, String, i16)> = sqlx::query_as(
+            "SELECT p.owner_guid, p.petition_guid, p.charter_guid, p.name, c.race::SMALLINT \
+             FROM characters.petition p JOIN characters.characters c ON c.guid = p.owner_guid",
+        )
+        .fetch_all(&*self.pool)
+        .await
+        .context("Failed to load PostgreSQL petitions")?;
+        Ok(rows
+            .into_iter()
+            .map(|(owner_guid, petition_guid, charter_guid, name, race)| {
+                (
+                    PgPetitionRow {
+                        owner_guid,
+                        petition_guid,
+                        charter_guid,
+                        name,
+                    },
+                    race,
+                )
+            })
+            .collect())
+    }
+    pub async fn load_all_signatures(&self) -> Result<Vec<PgPetitionSignatureRow>> {
+        sqlx::query_as("SELECT * FROM characters.petition_sign")
+            .fetch_all(&*self.pool)
+            .await
+            .context("Failed to load PostgreSQL petition signatures")
+    }
+    pub async fn rename_petition(&self, petition_guid: i64, name: &str) -> Result<()> {
+        sqlx::query("UPDATE characters.petition SET name=$2 WHERE petition_guid=$1")
+            .bind(petition_guid)
+            .bind(name)
+            .execute(&*self.pool)
+            .await
+            .context("Failed to rename PostgreSQL petition")
+            .map(|_| ())
+    }
     pub async fn delete_petition(&self, charter: i64) -> Result<()> {
         let mut tx = self
             .pool

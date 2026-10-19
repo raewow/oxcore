@@ -889,7 +889,10 @@ impl Opcode {
     pub const CMSG_GUILD_SET_PUBLIC_NOTE: Opcode = Opcode { vanilla: 0x0234, ..Opcode::NONE }; // 564
     pub const CMSG_GUILD_SET_OFFICER_NOTE: Opcode = Opcode { vanilla: 0x0235, ..Opcode::NONE }; // 565
     pub const CMSG_GUILD_INFO_TEXT: Opcode = Opcode { vanilla: 0x02FC, modern: 0x3075 }; // 764
-    pub const MSG_SAVE_GUILD_EMBLEM: Opcode = Opcode { vanilla: 0x01F1, ..Opcode::NONE }; // 497
+    /// The 1.14 request is `CMSG_SAVE_GUILD_EMBLEM`; its reply is
+    /// [`Opcode::SMSG_PLAYER_SAVE_GUILD_EMBLEM`].
+    pub const MSG_SAVE_GUILD_EMBLEM: Opcode = Opcode { vanilla: 0x01F1, modern: 0x32A0 }; // 497
+    pub const SMSG_PLAYER_SAVE_GUILD_EMBLEM: Opcode = Opcode { modern: 0x29F8, ..Opcode::NONE };
 
     // ============================================================================
     // Petition / Charter
@@ -902,12 +905,17 @@ impl Opcode {
     pub const SMSG_PETITION_SHOW_SIGNATURES: Opcode = Opcode { vanilla: 0x01BF, modern: 0x26B8 }; // 447
     pub const CMSG_PETITION_SIGN: Opcode = Opcode { vanilla: 0x01C0, modern: 0x3532 }; // 448
     pub const SMSG_PETITION_SIGN_RESULTS: Opcode = Opcode { vanilla: 0x01C1, modern: 0x2743 }; // 449
-    pub const MSG_PETITION_DECLINE: Opcode = Opcode { vanilla: 0x01C2, ..Opcode::NONE }; // 450
-    pub const SMSG_PETITION_QUERY_RESPONSE: Opcode = Opcode { vanilla: 0x01C3, modern: 0x291B }; // 451
+    /// The 1.14 request is `CMSG_DECLINE_PETITION`; 1.14 has no reply to the charter's owner.
+    pub const MSG_PETITION_DECLINE: Opcode = Opcode { vanilla: 0x01C2, modern: 0x3533 }; // 450
+    pub const CMSG_PETITION_QUERY: Opcode = Opcode { vanilla: 0x01C6, modern: 0x3272 }; // 454
+    pub const SMSG_PETITION_QUERY_RESPONSE: Opcode = Opcode { vanilla: 0x01C7, modern: 0x291B }; // 455
     pub const CMSG_TURN_IN_PETITION: Opcode = Opcode { vanilla: 0x01C4, modern: 0x3534 }; // 452
     pub const SMSG_TURN_IN_PETITION_RESULTS: Opcode = Opcode { vanilla: 0x01C5, modern: 0x2745 }; // 453
-    pub const CMSG_OFFER_PETITION: Opcode = Opcode { vanilla: 0x01C7, modern: 0x32F4 }; // 455
-    pub const MSG_PETITION_RENAME: Opcode = Opcode { vanilla: 0x02C1, ..Opcode::NONE }; // 705
+    pub const CMSG_OFFER_PETITION: Opcode = Opcode { vanilla: 0x01C3, modern: 0x32F4 }; // 451
+    /// The 1.14 request is `CMSG_PETITION_RENAME_GUILD`; its reply is
+    /// [`Opcode::SMSG_PETITION_RENAME_GUILD_RESPONSE`].
+    pub const MSG_PETITION_RENAME: Opcode = Opcode { vanilla: 0x02C1, modern: 0x36CF }; // 705
+    pub const SMSG_PETITION_RENAME_GUILD_RESPONSE: Opcode = Opcode { modern: 0x29F9, ..Opcode::NONE };
 
     // ============================================================================
     // Mail
@@ -2132,7 +2140,13 @@ pub const ALL: &[(Opcode, &str)] = &[
     ),
     (Opcode::CMSG_GUILD_INFO_TEXT, "CMSG_GUILD_INFO_TEXT"),
     (Opcode::MSG_SAVE_GUILD_EMBLEM, "MSG_SAVE_GUILD_EMBLEM"),
+    (Opcode::SMSG_PLAYER_SAVE_GUILD_EMBLEM, "SMSG_PLAYER_SAVE_GUILD_EMBLEM"),
     (Opcode::CMSG_PETITION_SHOWLIST, "CMSG_PETITION_SHOWLIST"),
+    (Opcode::CMSG_PETITION_QUERY, "CMSG_PETITION_QUERY"),
+    (
+        Opcode::SMSG_PETITION_RENAME_GUILD_RESPONSE,
+        "SMSG_PETITION_RENAME_GUILD_RESPONSE",
+    ),
     (Opcode::SMSG_PETITION_SHOWLIST, "SMSG_PETITION_SHOWLIST"),
     (Opcode::CMSG_PETITION_BUY, "CMSG_PETITION_BUY"),
     (
@@ -2689,8 +2703,8 @@ mod tests {
         // duplicate check would silently start passing on an empty set.
         assert_eq!(
             declared_opcodes().len(),
-            711,
-            "expected 711 opcode constants; update this count deliberately when adding opcodes"
+            714,
+            "expected 714 opcode constants; update this count deliberately when adding opcodes"
         );
     }
 

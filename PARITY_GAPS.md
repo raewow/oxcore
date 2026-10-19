@@ -79,8 +79,10 @@ field logic is Lua (`scripts/battlegrounds/`).
   (shown to hunters) opens nothing and MSG_LIST_STABLED_PETS is unhandled.
 - **Pet skills cannot be untrained.** Hunter pets keep no spell book, so the
   untrain option never shows.
-- **Guild charters and tabards only open their windows.** Buying and signing
-  charters and saving a tabard design are not handled.
+- **Charters found guilds through the basic join path.** Signers join the new
+  guild at its lowest rank the way GM-added members do, without the other
+  side of the guild system (member levels, classes and online fields) being
+  filled in.
 - **Some gossip conditions are rejected.** Saved variables (11), scripted map
   events (36) and explored areas (59) are not evaluated, so the few menus and
   options using them stay hidden. Instance script checks (18) are answered by

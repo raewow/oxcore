@@ -56,7 +56,7 @@ pub use mail::{
     Mail, MailCheckMask, MailDraft, MailItem, MailMessageType, MailResponseResult,
     MailResponseType, MailSender, MailState, MailStationery,
 };
-pub use petition::{PetitionInfo, PetitionResult, PetitionSignature, PetitionType};
+pub use petition::{PetitionResult, PetitionSignature, GUILD_CHARTER_SIGNATURES};
 pub use quest::{QuestFlags, QuestGiverStatus, QuestShareState, QuestStatus};
 pub use reputation::{
     apply_level_reduction, apply_vendor_discount, vendor_discount_pct, FactionFlags, FactionId,

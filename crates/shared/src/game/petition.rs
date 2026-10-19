@@ -1,85 +1,28 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PetitionType {
-    Guild = 1,
-    ArenaTeam = 2,
-}
+//! Guild charters.
 
-impl PetitionType {
-    pub fn as_u8(self) -> u8 {
-        self as u8
-    }
-}
+/// Signatures a guild charter needs before it can be turned in.
+pub const GUILD_CHARTER_SIGNATURES: u32 = 9;
 
+/// The outcome of signing or turning in a charter, numbered as the 1.12 client reads it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PetitionResult {
     Ok = 0,
     AlreadySigned = 1,
-    NoSignature = 2,
-    TooManySignatures = 3,
-    NoSuchPetition = 4,
-    NoSuchPetitionSignature = 5,
-    AlreadyInGuild = 6,
-    CannotSignSameGuild = 7,
-    PlayerNotFound = 8,
-    NotEligible = 9,
+    AlreadyInGuild = 2,
+    CantSignOwn = 3,
+    NeedMoreSignatures = 4,
+    NotServer = 5,
 }
 
 impl PetitionResult {
-    pub fn as_u8(self) -> u8 {
-        self as u8
-    }
-
     pub fn as_u32(self) -> u32 {
         self as u32
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct PetitionInfo {
-    pub guid: crate::protocol::ObjectGuid,
-    pub petition_id: u32,
-    pub petition_name: String,
-    pub deadline: u32,
-    pub creator_guid: crate::protocol::ObjectGuid,
-    pub signs: u8,
-    pub min_signatures: u8,
-    pub max_signatures: u8,
-    pub petition_type: PetitionType,
-    pub allow_modification: bool,
-}
-
-impl PetitionInfo {
-    pub fn new(guid: crate::protocol::ObjectGuid) -> Self {
-        Self {
-            guid,
-            petition_id: 0,
-            petition_name: String::new(),
-            deadline: 0,
-            creator_guid: crate::protocol::ObjectGuid::empty(),
-            signs: 0,
-            min_signatures: 0,
-            max_signatures: 0,
-            petition_type: PetitionType::Guild,
-            allow_modification: false,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+/// One player's name on a charter.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PetitionSignature {
     pub player_guid: crate::protocol::ObjectGuid,
     pub player_account: u32,
-    pub name: String,
-    pub offer_result: PetitionResult,
-}
-
-impl PetitionSignature {
-    pub fn new(player_guid: crate::protocol::ObjectGuid) -> Self {
-        Self {
-            player_guid,
-            player_account: 0,
-            name: String::new(),
-            offer_result: PetitionResult::Ok,
-        }
-    }
 }

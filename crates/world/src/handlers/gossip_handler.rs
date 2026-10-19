@@ -294,7 +294,7 @@ pub async fn handle_gossip_select_option(
 }
 
 /// Talking to a trainer, petitioner or tabard designer ends feign death.
-fn remove_feign_death(world: &World, player_guid: ObjectGuid) {
+pub(crate) fn remove_feign_death(world: &World, player_guid: ObjectGuid) {
     use crate::game::player::auras::effects::AURA_FEIGN_DEATH;
     world.managers.player_mgr.with_player_mut(player_guid, |player| {
         if !player
