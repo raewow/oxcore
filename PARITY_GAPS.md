@@ -84,10 +84,11 @@ field logic is Lua (`scripts/battlegrounds/`).
   remove hook yet.
 - **Guild charters and tabards only open their windows.** Buying and signing
   charters and saving a tabard design are not handled.
-- **Some gossip conditions are rejected.** Saved variables (11), instance
-  script checks (18), object flags (31), scripted map events (36) and explored
-  areas (59) are not evaluated, so the few menus and options using them stay
-  hidden.
+- **Some gossip conditions are rejected.** Saved variables (11), scripted map
+  events (36) and explored areas (59) are not evaluated, so the few menus and
+  options using them stay hidden. Instance script checks (18) are answered by
+  Temple of Ahn'Qiraj only; Blackwing Lair's scepter run and Zul'Gurub's
+  Thekal checks are not scripted.
 - **Game object reach is approximate.** Choosing a game object's option
   allows a fixed reach around its centre instead of measuring its bounds.
 - **English only.** Localised option, box, point-of-interest and quest

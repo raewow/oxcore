@@ -157,6 +157,38 @@ impl LuaInstanceAI {
         })
     }
 
+    /// Call CheckCondition(instance, player, map_id, condition_id): whether the copy meets
+    /// one of its own scripted conditions. Scripts without the callback meet none.
+    pub fn check_condition(
+        &self,
+        lua: &Lua,
+        snapshot: &InstanceSnapshot,
+        player_guid: ObjectGuid,
+        map_id: u32,
+        condition_id: u32,
+    ) -> bool {
+        let Some(table) = self.get_script_table(lua) else {
+            return false;
+        };
+        let Ok(func) = table.get::<Function>("CheckCondition") else {
+            return false;
+        };
+        let Ok(input) = snapshot.to_lua_table(lua) else {
+            return false;
+        };
+        match func.call::<bool>((table, input, LuaGuid(player_guid), map_id, condition_id)) {
+            Ok(met) => met,
+            Err(e) => {
+                tracing::error!(
+                    "Error in instance script {} callback CheckCondition: {}",
+                    self.map_id,
+                    e
+                );
+                false
+            }
+        }
+    }
+
     /// Get the script table from Lua registry.
     fn get_script_table(&self, lua: &Lua) -> Option<Table> {
         let key = format!("instance_{}", self.map_id);

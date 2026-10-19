@@ -160,6 +160,23 @@ impl ConditionManager {
                     }
                 })
                 .unwrap_or(false),
+            18 => object_map(context.target, world)
+                .or_else(|| object_map(context.source, world))
+                .is_some_and(|(map, instance)| {
+                    let player = if context.target.is_player() {
+                        context.target
+                    } else {
+                        ObjectGuid::empty()
+                    };
+                    crate::game::instance::scripts::check_condition(
+                        world,
+                        map,
+                        instance,
+                        player,
+                        entry.values[0] as u32,
+                        entry.values[1] as u32,
+                    )
+                }),
             19 => context.target.is_player()
                 && world
                     .systems
@@ -254,6 +271,8 @@ impl ConditionManager {
                     context.target.is_player()
                 }
             }
+            31 => object_field_flags(context.source, entry.values[0] as u32, world)
+                .is_some_and(|value| value & entry.values[1] as u32 != 0),
             33 => object_map(context.source, world)
                 .or_else(|| object_map(context.target, world))
                 .is_some_and(|(map, _)| map == entry.values[0] as u32),
@@ -457,6 +476,35 @@ fn spawned_gameobject(spawn_id: u32, context: ConditionContext, world: &World) -
             go.spawn_id == spawn_id && go.map_id == map_id && go.instance_id == instance_id
         })
         .map(|e| *e.key())
+}
+
+/// The value of a flags field of an object, for the flag fields scripts test.
+fn object_field_flags(guid: ObjectGuid, field: u32, world: &World) -> Option<u32> {
+    use oxcore_shared::protocol::update_fields::{
+        GAMEOBJECT_FLAGS, UNIT_DYNAMIC_FLAGS, UNIT_FIELD_FLAGS, UNIT_NPC_FLAGS,
+    };
+    if guid.is_game_object() {
+        return match field {
+            GAMEOBJECT_FLAGS => world
+                .managers
+                .gameobject_mgr
+                .with_gameobject(guid, |go| go.flags),
+            _ => None,
+        };
+    }
+    if guid.is_player() {
+        return world.managers.player_mgr.with_player(guid, |p| match field {
+            UNIT_FIELD_FLAGS => Some(p.unit_flags),
+            UNIT_NPC_FLAGS => Some(0),
+            _ => None,
+        })?;
+    }
+    world.managers.creature_mgr.with_creature(guid, |c| match field {
+        UNIT_FIELD_FLAGS => Some(c.unit_flags),
+        UNIT_DYNAMIC_FLAGS => Some(c.dynamic_flags),
+        UNIT_NPC_FLAGS => Some(c.npc_flags),
+        _ => None,
+    })?
 }
 
 fn player_zone(guid: ObjectGuid, world: &World) -> Option<u32> {
@@ -713,4 +761,49 @@ mod tests {
     }
 
     const INVENTORY_BAG: u8 = 255;
+
+    #[tokio::test]
+    async fn instance_condition_asks_the_copys_script() {
+        use crate::core::lua::scripts::InstanceScriptState;
+        let world = test_world();
+        let player = add_player(&world, 1, 1);
+        world.managers.player_mgr.with_player_mut(player, |p| {
+            p.map_id = 531;
+            p.instance_id = 7;
+        });
+        world.managers.lua_mgr.with_lua(|lua| {
+            let table: mlua::Table = lua
+                .load(
+                    r#"return {
+                        CheckCondition = function(self, input, player, map_id, id)
+                            return input:GetData(id) == 2
+                        end,
+                    }"#,
+                )
+                .eval()
+                .expect("script loads");
+            world
+                .managers
+                .lua_mgr
+                .register_instance_script_table(531, table);
+        });
+        let mut state = InstanceScriptState::new();
+        state.set_data(4, 2);
+        world.managers.lua_mgr.set_instance_state(531, 7, state);
+
+        assert!(check(&world, 18, [4, 4, 0, 0], player));
+        assert!(!check(&world, 18, [5, 5, 0, 0], player));
+    }
+
+    #[tokio::test]
+    async fn flag_condition_reads_the_npc_flags() {
+        let world = test_world();
+        let player = add_player(&world, 1, 1);
+        assert!(!check(&world, 31, [147, 2, 0, 0], player));
+        world
+            .managers
+            .player_mgr
+            .with_player_mut(player, |p| p.unit_flags = 0x8);
+        assert!(check(&world, 31, [46, 0x8, 0, 0], player));
+    }
 }

@@ -53,6 +53,24 @@ pub(crate) fn snapshot(
     snapshot
 }
 
+/// Whether a copy's script says it meets its condition `condition_id` for `player`.
+pub(crate) fn check_condition(
+    world: &World,
+    map_id: u32,
+    instance_id: u32,
+    player: ObjectGuid,
+    map_param: u32,
+    condition_id: u32,
+) -> bool {
+    let Some(script) = script_for(world, map_id, instance_id) else {
+        return false;
+    };
+    let snapshot = snapshot(world, map_id, instance_id);
+    world.managers.lua_mgr.with_lua(|lua| {
+        script.check_condition(lua, &snapshot, player, map_param, condition_id)
+    })
+}
+
 /// Create a copy's script state (restored from its save) and run `OnLoad`, once.
 /// Safe to call repeatedly; only the first call for a copy does anything.
 pub async fn ensure_loaded(world: &World, map_id: u32, instance_id: u32) {

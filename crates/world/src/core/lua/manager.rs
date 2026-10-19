@@ -308,6 +308,21 @@ impl LuaScriptManager {
         }
     }
 
+    /// Register an instance script table directly (used by tests).
+    /// This is the Rust equivalent of calling `RegisterInstanceScript(map_id, script_table)` in Lua.
+    pub fn register_instance_script_table(&self, map_id: u32, script_table: mlua::Table) {
+        let key = format!("instance_{}", map_id);
+        let lua = self.lua.read();
+        let _ = lua.set_named_registry_value(&key, script_table);
+        self.registry.instance.write().insert(
+            map_id,
+            super::api::ScriptEntry {
+                name: key,
+                file_path: String::new(),
+            },
+        );
+    }
+
     /// Register a gossip script table directly (used by tests).
     /// This is the Rust equivalent of calling `RegisterGossipScript(entry, script_table)` in Lua.
     pub fn register_gossip_script_table(&self, entry: u32, script_table: mlua::Table) {
