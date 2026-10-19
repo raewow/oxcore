@@ -67,6 +67,7 @@ pub struct Managers {
     pub pathfinder: Arc<PathFinder>,
     pub waypoint_mgr: Arc<WaypointManager>,
     pub area_trigger_mgr: Arc<AreaTriggerManager>,
+    pub taxi_mgr: Arc<crate::game::taxi::TaxiManager>,
     pub condition_mgr: Arc<ConditionManager>,
     pub instance_mgr: Arc<crate::game::instance::InstanceMgr>,
     pub game_event_mgr: Arc<crate::game::game_event::GameEventManager>,
@@ -231,6 +232,7 @@ impl World {
                 pathfinder,
                 waypoint_mgr,
                 area_trigger_mgr,
+                taxi_mgr: Arc::new(crate::game::taxi::TaxiManager::new()),
                 condition_mgr,
                 instance_mgr,
                 game_event_mgr: Arc::new(crate::game::game_event::GameEventManager::new()),
@@ -473,6 +475,21 @@ impl World {
             .load(self.content_patch())
             .await
             .context("Failed to load area triggers")?;
+
+        // Flight paths. Paths only scripted spells fly are kept off the
+        // flight-master network.
+        let spell_flight_paths: std::collections::HashSet<u32> = self
+            .managers
+            .spell_mgr
+            .effect_misc_values(crate::game::taxi::SPELL_EFFECT_SEND_TAXI)
+            .into_iter()
+            .filter_map(|path| u32::try_from(path).ok())
+            .collect();
+        self.managers
+            .taxi_mgr
+            .load(&self.databases.world, &self.dbc, &spell_flight_paths)
+            .await
+            .context("Failed to load taxi network")?;
 
         // Initialize instance manager: id allocation, the raid reset schedule,
         // expired/unbound saves, then the respawn deadlines that survive.
@@ -720,6 +737,9 @@ impl World {
             // Formation members fall in behind their leaders.
             crate::game::creature::formation::update_formations(self);
         }
+
+        // Players on a flight move along it.
+        crate::game::taxi::flight::update(self).await?;
 
         self.session_mgr.update_logout_timers(self).await?;
 
@@ -1101,6 +1121,7 @@ impl Clone for World {
                 pathfinder: Arc::clone(&self.managers.pathfinder),
                 waypoint_mgr: Arc::clone(&self.managers.waypoint_mgr),
                 area_trigger_mgr: Arc::clone(&self.managers.area_trigger_mgr),
+                taxi_mgr: Arc::clone(&self.managers.taxi_mgr),
                 condition_mgr: Arc::clone(&self.managers.condition_mgr),
                 instance_mgr: Arc::clone(&self.managers.instance_mgr),
                 game_event_mgr: Arc::clone(&self.managers.game_event_mgr),

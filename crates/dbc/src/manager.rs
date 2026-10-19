@@ -5,7 +5,8 @@ use crate::structures::{
     FactionDbcEntry, FactionTemplateDbcEntry, GameObjectDisplayInfoEntry, ItemEntry, LockEntry,
     MapEntry, SkillLineAbilityEntry, SkillLineEntry, SkillRaceClassInfoEntry, SkillTiersEntry,
     SpellCastTimeEntry, SpellDurationEntry, SpellFocusObjectEntry, SpellRadiusEntry,
-    SpellRangeEntry, TalentEntry, TalentTabEntry, WorldSafeLocsEntry,
+    SpellRangeEntry, TalentEntry, TalentTabEntry, TaxiPathEntry, TaxiPathNodeEntry,
+    WorldSafeLocsEntry,
 };
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -14,6 +15,8 @@ use tracing::{debug, error, info, warn};
 pub struct DbcManager {
     pub area_table: DbcStore<AreaTableEntry>,
     pub area_trigger: DbcStore<AreaTriggerEntry>,
+    pub taxi_path: DbcStore<TaxiPathEntry>,
+    pub taxi_path_node: DbcStore<TaxiPathNodeEntry>,
     pub auction_house: DbcStore<AuctionHouseEntry>,
     pub bank_bag_slot_prices: DbcStore<BankBagSlotPricesEntry>,
     pub chr_classes: DbcStore<ChrClassesEntry>,
@@ -60,6 +63,8 @@ impl DbcManager {
         Self {
             area_table: DbcStore::new("niiixxxxxxxxxxxxxxxxxxxiiixx"),
             area_trigger: DbcStore::new("niffffffff"),
+            taxi_path: DbcStore::new("niii"),
+            taxi_path_node: DbcStore::new("iiiifffii"),
             auction_house: DbcStore::new("niiixxxxxxxxxxxxxx"),
             bank_bag_slot_prices: DbcStore::new("ni"),
             chr_classes: DbcStore::new(&chr_classes_format),
@@ -149,6 +154,8 @@ impl DbcManager {
 
         Self::load_dbc(&mut self.area_table, dbc_path, "AreaTable.dbc")?;
         Self::load_dbc(&mut self.area_trigger, dbc_path, "AreaTrigger.dbc")?;
+        Self::load_dbc(&mut self.taxi_path, dbc_path, "TaxiPath.dbc")?;
+        Self::load_dbc(&mut self.taxi_path_node, dbc_path, "TaxiPathNode.dbc")?;
         Self::load_dbc(&mut self.auction_house, dbc_path, "AuctionHouse.dbc")?;
         Self::load_dbc(
             &mut self.bank_bag_slot_prices,

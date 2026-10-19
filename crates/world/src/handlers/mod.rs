@@ -34,6 +34,7 @@ pub mod settings;
 pub mod social;
 pub mod spells;
 pub mod talent;
+pub mod taxi;
 pub mod ticket;
 pub mod trade;
 pub mod trainer_handler;
@@ -948,11 +949,21 @@ pub async fn dispatch_packet(
                     movement::handle_movement_flag_change_ack(session, opcode, packet, world)?;
                 }
 
-                // Stubs for systems not yet in v2
+                // Flight masters
                 Opcode::CMSG_TAXINODE_STATUS_QUERY => {
-                    // Taxi system not wired in v2 yet
-                    debug!("CMSG_TAXINODE_STATUS_QUERY stub");
+                    taxi::handle_taxinode_status_query(session, packet, world)?;
                 }
+                Opcode::CMSG_TAXIQUERYAVAILABLENODES => {
+                    taxi::handle_taxi_query_available_nodes(session, packet, world)?;
+                }
+                Opcode::CMSG_ACTIVATETAXI => {
+                    taxi::handle_activate_taxi(session, packet, world).await?;
+                }
+                Opcode::CMSG_ACTIVATETAXIEXPRESS => {
+                    taxi::handle_activate_taxi_express(session, packet, world).await?;
+                }
+
+                // Stubs for systems not yet in v2
                 Opcode::CMSG_BATTLEFIELD_STATUS => {
                     // No battleground system - send empty status
                     let mut response = WorldPacket::new(Opcode::SMSG_BATTLEFIELD_STATUS);

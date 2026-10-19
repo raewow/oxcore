@@ -520,6 +520,7 @@ impl Opcode {
     pub const CMSG_TAXIQUERYAVAILABLENODES: Opcode = Opcode { vanilla: 0x01AC, modern: 0x34AA }; // 428
     pub const SMSG_SHOWTAXINODES: Opcode = Opcode { vanilla: 0x01A9, modern: 0x26C5 }; // 425
     pub const CMSG_ACTIVATETAXI: Opcode = Opcode { vanilla: 0x01AD, modern: 0x34AB }; // 429
+    pub const CMSG_ACTIVATETAXIEXPRESS: Opcode = Opcode { vanilla: 0x0312, ..Opcode::NONE }; // 786
     pub const SMSG_ACTIVATETAXIREPLY: Opcode = Opcode { vanilla: 0x01AE, modern: 0x2676 }; // 430
     pub const SMSG_NEW_TAXI_PATH: Opcode = Opcode { vanilla: 0x01AF, modern: 0x2677 }; // 431
 
@@ -1126,6 +1127,10 @@ impl Opcode {
     pub const SMSG_MOVE_UPDATE: Opcode = Opcode { modern: 0x2DE0, ..Opcode::NONE };
     /// Same-map teleport sent to the moving client; vanilla uses `MSG_MOVE_TELEPORT_ACK` for it.
     pub const SMSG_MOVE_TELEPORT: Opcode = Opcode { modern: 0x2E04, ..Opcode::NONE };
+    pub const SMSG_MOVE_UNSET_CAN_FLY: Opcode = Opcode { modern: 0x2E06, ..Opcode::NONE };
+    pub const SMSG_MOVE_ENABLE_GRAVITY: Opcode = Opcode { modern: 0x2E0E, ..Opcode::NONE };
+    /// Whether the client may move its own character.
+    pub const SMSG_CONTROL_UPDATE: Opcode = Opcode { vanilla: 0x0159, modern: 0x2640 }; // 345
 
     // Enter-world packets with no 1.12 counterpart. The client waits on these before it will
     // finish loading, which is why a login that looks complete server-side can still hang or die.
@@ -1656,6 +1661,7 @@ pub const ALL: &[(Opcode, &str)] = &[
     ),
     (Opcode::SMSG_SHOWTAXINODES, "SMSG_SHOWTAXINODES"),
     (Opcode::CMSG_ACTIVATETAXI, "CMSG_ACTIVATETAXI"),
+    (Opcode::CMSG_ACTIVATETAXIEXPRESS, "CMSG_ACTIVATETAXIEXPRESS"),
     (Opcode::SMSG_ACTIVATETAXIREPLY, "SMSG_ACTIVATETAXIREPLY"),
     (Opcode::SMSG_NEW_TAXI_PATH, "SMSG_NEW_TAXI_PATH"),
     (Opcode::CMSG_LEARN_TALENT, "CMSG_LEARN_TALENT"),
@@ -2301,6 +2307,9 @@ pub const ALL: &[(Opcode, &str)] = &[
     (Opcode::SMSG_WEATHER, "SMSG_WEATHER"),
     (Opcode::SMSG_MOVE_UPDATE, "SMSG_MOVE_UPDATE"),
     (Opcode::SMSG_MOVE_TELEPORT, "SMSG_MOVE_TELEPORT"),
+    (Opcode::SMSG_MOVE_UNSET_CAN_FLY, "SMSG_MOVE_UNSET_CAN_FLY"),
+    (Opcode::SMSG_MOVE_ENABLE_GRAVITY, "SMSG_MOVE_ENABLE_GRAVITY"),
+    (Opcode::SMSG_CONTROL_UPDATE, "SMSG_CONTROL_UPDATE"),
     (Opcode::SMSG_RESUME_COMMS, "SMSG_RESUME_COMMS"),
     (Opcode::SMSG_WORLD_SERVER_INFO, "SMSG_WORLD_SERVER_INFO"),
     (
@@ -2590,8 +2599,8 @@ mod tests {
         // duplicate check would silently start passing on an empty set.
         assert_eq!(
             declared_opcodes().len(),
-            683,
-            "expected 683 opcode constants; update this count deliberately when adding opcodes"
+            687,
+            "expected 687 opcode constants; update this count deliberately when adding opcodes"
         );
     }
 

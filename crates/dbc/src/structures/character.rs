@@ -441,6 +441,8 @@ pub struct ChrRacesEntry {
     pub res_sickness_spell_id: u32,
     /// Cinematic sequence ID for this race (field 16)
     pub cinematic_sequence_id: u32,
+    /// First word of the taxi node mask a new character starts with (field 14)
+    pub starting_taxi_mask: u32,
 }
 
 impl DbcEntry for ChrRacesEntry {
@@ -469,6 +471,7 @@ impl DbcEntry for ChrRacesEntry {
             .context("Failed to read ChrRaces model_f")?;
         let res_sickness_spell_id = record.get_u32(12).unwrap_or(15007); // Default to 15007 if field doesn't exist or is 0
         let cinematic_sequence_id = record.get_u32(16).unwrap_or(0); // Default to 0 if field doesn't exist
+        let starting_taxi_mask = record.get_u32(14).unwrap_or(0);
 
         let entry = Self {
             id,
@@ -476,6 +479,7 @@ impl DbcEntry for ChrRacesEntry {
             model_f,
             res_sickness_spell_id,
             cinematic_sequence_id,
+            starting_taxi_mask,
         };
 
         Ok(Some((id, entry)))

@@ -328,6 +328,13 @@ pub async fn handle_player_login_with_guid(
     player.player_flags = u32::try_from(character.character_flags)?;
     player.xp = u32::try_from(character.xp)?;
     player.ammo_id = u32::try_from(character.ammo_id)?;
+    crate::game::taxi::flight::load_for_login(
+        world,
+        &mut player.taxi,
+        character_race,
+        character.known_taxi_mask.as_deref(),
+        character.current_taxi_path.as_deref(),
+    );
 
     // Load homebind from database
     let homebind = char_repo.find_homebind(i64::from(guid.counter())).await?;
@@ -1427,6 +1434,9 @@ pub async fn handle_player_login_with_guid(
         login_start.elapsed().as_millis()
     );
     info!("[LOGIN] Login sequence complete for player {:?}", guid);
+
+    // A journey interrupted by logging out carries on.
+    crate::game::taxi::flight::resume(world, guid);
 
     // Clear login guard so session can be reused if player logs out and back in
     session.clear_login_in_progress();

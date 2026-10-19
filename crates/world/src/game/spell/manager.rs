@@ -784,6 +784,19 @@ impl SpellManager {
     }
 
     /// Get spell count
+    /// Every spell's `(effect, misc value)` for effect type `effect`.
+    pub fn effect_misc_values(&self, effect: u32) -> Vec<i32> {
+        self.spells
+            .iter()
+            .flat_map(|spell| {
+                (0..3)
+                    .filter(|&i| spell.effect[i] == effect)
+                    .map(|i| spell.effect_misc_value[i])
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
     pub fn len(&self) -> usize {
         self.spells.len()
     }

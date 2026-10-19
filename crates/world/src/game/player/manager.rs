@@ -517,6 +517,21 @@ impl PlayerManager {
         Ok(())
     }
 
+    /// Save the known flight points and the hop in progress.
+    pub async fn save_taxi(
+        &self,
+        player_guid: ObjectGuid,
+        character_db: &sqlx::PgPool,
+    ) -> anyhow::Result<()> {
+        let (mask, journey) = self
+            .get_player(player_guid)
+            .map(|p| (p.taxi.mask_to_string(), p.taxi.journey_to_string()))
+            .ok_or_else(|| anyhow::anyhow!("Player not found"))?;
+        PgCharacterRepository::new(Arc::new(character_db.clone()))
+            .save_taxi(i64::from(player_guid.counter()), &mask, &journey)
+            .await
+    }
+
     /// Save player experience and level to database
     pub async fn save_experience(
         &self,
@@ -901,6 +916,14 @@ impl PlayerManager {
             return Err(e);
         }
         tracing::info!("[{context}] Saved position for player {}", player_guid);
+
+        if let Err(e) = self.save_taxi(player_guid, character_db).await {
+            tracing::error!(
+                "[{context}] Failed saving taxi state for player {}: {}",
+                player_guid,
+                e
+            );
+        }
 
         tracing::info!("[{context}] Saving XP/level for player {}", player_guid);
         if let Err(e) = self.save_experience(player_guid, character_db).await {

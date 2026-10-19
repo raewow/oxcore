@@ -282,10 +282,8 @@ impl GossipSystem {
                 info!("Trainer option selected - would open trainer window");
             }
             gossip_option::TAXIVENDOR => {
-                // Close gossip, open taxi
+                // Close gossip; the handler then opens the flight map.
                 self.send_gossip_complete(player_guid);
-                // TODO: Open taxi window
-                info!("Taxi option selected - would open taxi window");
             }
             gossip_option::BANKER => {
                 info!(

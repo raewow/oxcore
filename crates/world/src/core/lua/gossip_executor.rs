@@ -128,11 +128,13 @@ pub async fn execute_gossip_actions(
                     .send_vendor_list(player_guid, npc_guid)
                     .await?;
             }
+            LuaAction::SendTaxi => {
+                crate::game::taxi::flight::talk_to_flight_master(world, player_guid, npc_guid);
+            }
             LuaAction::SendTrainer
             | LuaAction::SendBanker
             | LuaAction::SendAuctioneer
-            | LuaAction::SendInnkeeper
-            | LuaAction::SendTaxi => {
+            | LuaAction::SendInnkeeper => {
                 debug!(
                     "Gossip executor: NPC window action not yet implemented: {:?}",
                     action

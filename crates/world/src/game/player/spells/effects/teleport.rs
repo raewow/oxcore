@@ -297,22 +297,16 @@ pub async fn effect_summon_player(input: &EffectInput, world: &World) -> Result<
 
 /// Send-taxi effect (123)
 ///
-/// Send the player on a taxi/flight path.
-/// Used for flight masters.
+/// Fly the player along the scripted taxi path named by the misc value.
 pub async fn effect_send_taxi(input: &EffectInput, world: &World) -> Result<EffectResult> {
     let target_guid = input.target_guid.unwrap_or(input.caster_guid);
-
-    // Get taxi path ID from misc_value
-    let taxi_path_id = input.misc_value as u32;
-
-    // TODO: Start taxi flight
-
-    tracing::debug!(
-        "Send taxi: target={:?} path_id={}",
-        target_guid,
-        taxi_path_id
-    );
-
+    if !target_guid.is_player() {
+        return Ok(EffectResult::empty());
+    }
+    let Ok(path) = u32::try_from(input.misc_value) else {
+        return Ok(EffectResult::empty());
+    };
+    crate::game::taxi::flight::activate_path(world, target_guid, path, input.spell_id).await?;
     Ok(EffectResult::empty())
 }
 

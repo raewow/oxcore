@@ -200,6 +200,64 @@ impl ToWorldPacket for SmsgForceMoveUnroot {
     }
 }
 
+/// SMSG_CONTROL_UPDATE: whether the client may steer its own character
+/// (taken away for a flight on 1.14).
+#[derive(Debug, Clone)]
+pub struct SmsgControlUpdate {
+    pub guid: WorldObjectGuid,
+    pub has_control: bool,
+}
+
+impl ToWorldPacket for SmsgControlUpdate {
+    fn to_vanilla(&self) -> WorldPacket {
+        let mut packet = WorldPacket::new(Opcode::SMSG_CONTROL_UPDATE);
+        packet.write_packed_guid(self.guid);
+        packet.write_u8(u8::from(self.has_control));
+        packet
+    }
+
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.guid.to_guid128(MODERN_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+        writer.write_bit(self.has_control);
+        writer.flush_bits();
+        Some(writer.finish(Opcode::SMSG_CONTROL_UPDATE))
+    }
+}
+
+/// SMSG_MOVE_ENABLE_GRAVITY (1.14 only): gravity back on after a flight.
+#[derive(Debug, Clone)]
+pub struct SmsgMoveEnableGravity {
+    pub guid: WorldObjectGuid,
+}
+
+impl ToWorldPacket for SmsgMoveEnableGravity {
+    fn to_vanilla(&self) -> WorldPacket {
+        WorldPacket::new(Opcode::SMSG_MOVE_ENABLE_GRAVITY)
+    }
+
+    fn to_modern(&self) -> Option<WorldPacket> {
+        Some(move_set_flag(Opcode::SMSG_MOVE_ENABLE_GRAVITY, self.guid))
+    }
+}
+
+/// SMSG_MOVE_UNSET_CAN_FLY (1.14 only): the client stops flying after a flight.
+#[derive(Debug, Clone)]
+pub struct SmsgMoveUnsetCanFly {
+    pub guid: WorldObjectGuid,
+}
+
+impl ToWorldPacket for SmsgMoveUnsetCanFly {
+    fn to_vanilla(&self) -> WorldPacket {
+        WorldPacket::new(Opcode::SMSG_MOVE_UNSET_CAN_FLY)
+    }
+
+    fn to_modern(&self) -> Option<WorldPacket> {
+        Some(move_set_flag(Opcode::SMSG_MOVE_UNSET_CAN_FLY, self.guid))
+    }
+}
+
 /// Spline flags for movement packets
 pub mod spline_flags {
     pub const DONE: u32 = 0x00000001;
@@ -210,6 +268,12 @@ pub mod spline_flags {
     pub const RUNMODE: u32 = 0x00000000;
     pub const CATMULLROM: u32 = 0x00100000;
 }
+
+/// Spline flags 1.14 wants for a flight path: Flying, CatmullRom, CanSwim,
+/// UncompressedPath and the Unknown5/Steering/Unknown10 set that makes the
+/// client animate the move.
+const MODERN_FLIGHT_SPLINE_FLAGS: u32 =
+    0x0000_0200 | 0x0000_0800 | 0x0020_0000 | 0x0040_0000 | 0x0100_0000 | 0x1000_0000 | 0x8000_0000;
 
 /// SMSG_MONSTER_MOVE (0x00DD)
 #[derive(Debug, Clone)]
@@ -409,30 +473,33 @@ impl ToWorldPacket for SmsgMonsterMove {
         packet.write_u32(self.spline_flags);
         packet.write_u32(self.duration);
 
-        // Linear path format:
-        // - count (number of waypoints excluding start, i.e. segments)
-        // - destination (last waypoint) as full xyz
-        // - intermediate waypoints as packed offsets from midpoint(start, dest)
         let wp_count = self.waypoints.len() as u32;
         packet.write_u32(wp_count);
 
-        if !self.waypoints.is_empty() {
-            let dest = self.waypoints.last().unwrap();
-            // Write destination as full xyz
+        // A flying (smooth) path lists every point in full.
+        if self.spline_flags & spline_flags::FLYING != 0 {
+            for wp in &self.waypoints {
+                packet.write_f32(wp.x);
+                packet.write_f32(wp.y);
+                packet.write_f32(wp.z);
+            }
+            return packet;
+        }
+
+        // A linear path gives the destination in full, then each intermediate
+        // point as a packed offset back from the destination.
+        if let Some(dest) = self.waypoints.last() {
             packet.write_f32(dest.x);
             packet.write_f32(dest.y);
             packet.write_f32(dest.z);
 
-            // Intermediate waypoints as packed delta from midpoint
-            if self.waypoints.len() > 1 {
-                let middle_x = (self.position.x + dest.x) / 2.0;
-                let middle_y = (self.position.y + dest.y) / 2.0;
-                let middle_z = (self.position.z + dest.z) / 2.0;
-
-                // Write all intermediate points (skip last which is the destination)
-                for wp in &self.waypoints[..self.waypoints.len() - 1] {
-                    packet.write_pack_xyz(middle_x - wp.x, middle_y - wp.y, middle_z - wp.z);
+            for wp in &self.waypoints[..self.waypoints.len() - 1] {
+                let (dx, dy, mut dz) = (dest.x - wp.x, dest.y - wp.y, dest.z - wp.z);
+                // The client freezes on an all-zero offset; nudge it.
+                if dx.abs() < 0.25 && dy.abs() < 0.25 && dz.abs() < 0.25 {
+                    dz += if dz < 0.0 { 0.51 } else { 0.26 };
                 }
+                packet.write_pack_xyz(dx, dy, dz);
             }
         }
 
@@ -461,8 +528,11 @@ impl ToWorldPacket for SmsgMonsterMove {
 
         // A stop carries no path, so nothing below produces points.
         let is_stop = self.move_type == SPLINE_TYPE_STOP;
+        let flying = self.spline_flags & spline_flags::FLYING != 0;
         let (points, deltas) = if is_stop {
             (Vec::new(), Vec::new())
+        } else if flying {
+            (self.waypoints.clone(), Vec::new())
         } else {
             self.modern_path()
         };
@@ -473,6 +543,8 @@ impl ToWorldPacket for SmsgMonsterMove {
 
         writer.write_u32(if is_stop {
             0
+        } else if flying {
+            MODERN_FLIGHT_SPLINE_FLAGS
         } else {
             to_modern_spline_flags(self.spline_flags)
         });
@@ -666,6 +738,58 @@ mod modern_tests {
 
     fn guid() -> ObjectGuid {
         ObjectGuid::new_without_entry(crate::protocol::HighGuid::Unit, 42)
+    }
+
+    fn path_move(flags: u32) -> SmsgMonsterMove {
+        SmsgMonsterMove {
+            guid: guid(),
+            position: Position::new(0.0, 0.0, 0.0, 0.0),
+            spline_id: 1,
+            move_type: 0,
+            facing_target: None,
+            facing_angle: None,
+            spline_flags: flags,
+            duration: 1000,
+            waypoints: vec![
+                Position::new(10.0, 0.0, 0.0, 0.0),
+                Position::new(20.0, 4.0, 0.0, 0.0),
+            ],
+        }
+    }
+
+    #[test]
+    fn vanilla_linear_path_packs_intermediate_points_back_from_the_destination() {
+        let packet = path_move(0x100).to_vanilla();
+        let body = packet.contents();
+        // count, destination, one packed offset
+        let path = &body[body.len() - 20..];
+        assert_eq!(&path[..4], &2u32.to_le_bytes());
+        assert_eq!(&path[4..8], &20.0f32.to_le_bytes());
+        // One packed offset: destination (20, 4, 0) minus point (10, 0, 0).
+        let packed = u32::from_le_bytes(path[16..20].try_into().unwrap());
+        let x = ((packed & 0x7FF) as i32) << 21 >> 21;
+        let y = (((packed >> 11) & 0x7FF) as i32) << 21 >> 21;
+        assert_eq!((x as f32 * 0.25, y as f32 * 0.25), (10.0, 4.0));
+        assert_eq!(&body[body.len() - 24..body.len() - 20], &1000u32.to_le_bytes());
+    }
+
+    #[test]
+    fn flying_path_lists_every_point_in_full_on_both_protocols() {
+        let message = path_move(0x100 | spline_flags::FLYING);
+        let vanilla = message.to_vanilla();
+        let body = vanilla.contents();
+        let path = &body[body.len() - 28..];
+        assert_eq!(&path[..4], &2u32.to_le_bytes());
+        assert_eq!(&path[4..8], &10.0f32.to_le_bytes());
+        assert_eq!(&path[16..20], &20.0f32.to_le_bytes());
+        assert_eq!(&body[body.len() - 32..body.len() - 28], &1000u32.to_le_bytes());
+
+        let modern = message.to_modern().unwrap();
+        // Both points travel uncompressed, so the body ends with them.
+        let body = modern.contents();
+        let tail = &body[body.len() - 24..];
+        assert_eq!(&tail[..4], &10.0f32.to_le_bytes());
+        assert_eq!(&tail[12..16], &20.0f32.to_le_bytes());
     }
 
     #[test]

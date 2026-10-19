@@ -26,6 +26,7 @@ pub mod player;
 pub mod social;
 pub mod spell;
 pub mod system_mgr;
+pub mod taxi;
 pub mod ticket;
 pub mod trade;
 pub mod transport;

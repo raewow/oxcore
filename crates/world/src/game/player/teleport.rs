@@ -83,6 +83,9 @@ pub async fn teleport_to(
 
     let near = current_map == map_id && options & options::FORCE_MAP_CHANGE == 0;
 
+    // A teleport ends any flight (summons, GM moves, scripts).
+    crate::game::taxi::flight::interrupt(world, player_guid);
+
     // A far teleport checks the destination first, so a refusal leaves the
     // player's combat, pet and casting untouched.
     let instance_id = if near {
@@ -231,7 +234,7 @@ async fn leave_world(world: &World, player_guid: ObjectGuid, options: u32) -> Re
 /// Stop the player's auto-attack and drop them from combat. Creatures
 /// attacking them stop too; with `forget`, the creatures also strike the
 /// player from their threat lists (the player is leaving the map).
-fn stop_combat(world: &World, player_guid: ObjectGuid, forget: bool) {
+pub(crate) fn stop_combat(world: &World, player_guid: ObjectGuid, forget: bool) {
     if let Some(target) = world
         .systems
         .combat
@@ -276,7 +279,7 @@ fn stop_combat(world: &World, player_guid: ObjectGuid, forget: bool) {
 }
 
 /// Put the pet away for the trip, remembering it for [`resummon_pet`].
-fn put_pet_away(world: &World, player_guid: ObjectGuid) {
+pub(crate) fn put_pet_away(world: &World, player_guid: ObjectGuid) {
     let Some(pet_guid) = world
         .managers
         .player_mgr

@@ -70,6 +70,16 @@ pub async fn handle_area_trigger(
         return Ok(());
     };
 
+    // Triggers flown over on a taxi do nothing.
+    let in_flight = world
+        .managers
+        .player_mgr
+        .with_player(player_guid, |player| player.taxi.is_flying())
+        .unwrap_or(false);
+    if in_flight {
+        return Ok(());
+    }
+
     let area_trigger_mgr = &world.managers.area_trigger_mgr;
 
     // Get trigger geometry: template table first, DBC fallback

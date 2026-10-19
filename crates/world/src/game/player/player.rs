@@ -65,6 +65,8 @@ pub struct Player {
     pub teleport_unsummoned_pet: Option<u32>,
     /// A pending summon offer: destination map and spot, and when it lapses.
     pub summon_offer: Option<SummonOffer>,
+    /// Known flight points and the journey in progress.
+    pub taxi: crate::game::taxi::PlayerTaxi,
     /// Aura state (buffs/debuffs, slot management)
     pub auras: AuraState,
     /// Death state (death/resurrection state machine)
@@ -243,6 +245,7 @@ impl Player {
             active_pet: None,
             teleport_unsummoned_pet: None,
             summon_offer: None,
+            taxi: Default::default(),
             auras: AuraState::default(),
             death: DeathSystemState::default(),
             spells: SpellsState::default(),

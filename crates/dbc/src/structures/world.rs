@@ -223,3 +223,64 @@ impl DbcEntry for WorldSafeLocsEntry {
         Ok(Some((id, entry)))
     }
 }
+
+/// TaxiPath DBC entry: a direct flight between two taxi nodes.
+#[derive(Debug, Clone)]
+pub struct TaxiPathEntry {
+    pub id: u32,
+    pub from: u32,
+    pub to: u32,
+    pub price: u32,
+}
+
+impl DbcEntry for TaxiPathEntry {
+    fn from_record(record: &DbcRecord) -> Result<Option<(u32, Self)>> {
+        let id = record.get_u32(0).context("Failed to read TaxiPath ID")?;
+        if id == 0 {
+            return Ok(None);
+        }
+        Ok(Some((
+            id,
+            Self {
+                id,
+                from: record.get_u32(1).context("Failed to read TaxiPath from")?,
+                to: record.get_u32(2).context("Failed to read TaxiPath to")?,
+                price: record.get_u32(3).context("Failed to read TaxiPath price")?,
+            },
+        )))
+    }
+}
+
+/// TaxiPathNode DBC entry: one point of a taxi path.
+#[derive(Debug, Clone)]
+pub struct TaxiPathNodeEntry {
+    pub id: u32,
+    pub path: u32,
+    pub index: u32,
+    pub map_id: u32,
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub flags: u32,
+    pub delay: u32,
+}
+
+impl DbcEntry for TaxiPathNodeEntry {
+    fn from_record(record: &DbcRecord) -> Result<Option<(u32, Self)>> {
+        let id = record.get_u32(0).context("Failed to read TaxiPathNode ID")?;
+        Ok(Some((
+            id,
+            Self {
+                id,
+                path: record.get_u32(1).context("Failed to read TaxiPathNode path")?,
+                index: record.get_u32(2).context("Failed to read TaxiPathNode index")?,
+                map_id: record.get_u32(3).context("Failed to read TaxiPathNode map")?,
+                x: record.get_f32(4).context("Failed to read TaxiPathNode x")?,
+                y: record.get_f32(5).context("Failed to read TaxiPathNode y")?,
+                z: record.get_f32(6).context("Failed to read TaxiPathNode z")?,
+                flags: record.get_u32(7).unwrap_or(0),
+                delay: record.get_u32(8).unwrap_or(0),
+            },
+        )))
+    }
+}

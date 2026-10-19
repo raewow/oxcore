@@ -512,6 +512,10 @@ pub async fn handle_gossip_select_option(
                 crate::handlers::trainer_handler::send_trainer_list(player_guid, npc_guid, world)
                     .await?;
             }
+            gossip_option::TAXIVENDOR => {
+                // Learn this flight point, or open the flight map.
+                crate::game::taxi::flight::talk_to_flight_master(world, player_guid, npc_guid);
+            }
             _ => {
                 // Other options are handled by the gossip system
             }

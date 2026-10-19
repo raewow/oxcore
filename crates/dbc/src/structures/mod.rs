@@ -25,4 +25,6 @@ pub use spell::{
     SpellRangeEntry,
 };
 pub use talent::{TalentEntry, TalentTabEntry};
-pub use world::{AreaTableEntry, AreaTriggerEntry, MapEntry, WorldSafeLocsEntry};
+pub use world::{
+    AreaTableEntry, AreaTriggerEntry, MapEntry, TaxiPathEntry, TaxiPathNodeEntry, WorldSafeLocsEntry,
+};
