@@ -383,6 +383,9 @@ impl World {
         step("Loading gameobjects");
         self.managers.gameobject_mgr.set_patch(creature_patch);
         self.managers.gameobject_mgr.load_templates().await?;
+        if let Err(e) = self.managers.gameobject_mgr.load_display_bounds().await {
+            tracing::warn!("{e:#} (game objects are measured from their centre)");
+        }
         self.managers.gameobject_mgr.load_spawns().await?;
 
         // World events decide which event-linked spawns exist.

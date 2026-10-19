@@ -56,6 +56,8 @@ pub struct GameObjectManager {
     next_guid: AtomicU64,
     /// Current game patch for filtering spawns
     current_patch: std::sync::RwLock<u8>,
+    /// Model bounds (min x/y/z, max x/y/z) by display id, from gameobject_display_info_addon
+    display_bounds: DashMap<u32, [f32; 6]>,
 }
 
 impl GameObjectManager {
@@ -72,6 +74,7 @@ impl GameObjectManager {
             guid_to_spawn: DashMap::new(),
             next_guid: AtomicU64::new(1),
             current_patch: std::sync::RwLock::new(10),
+            display_bounds: DashMap::new(),
         }
     }
 
@@ -377,6 +380,37 @@ impl GameObjectManager {
 
         tracing::info!("Loaded {} gameobject templates", self.templates.len());
         Ok(())
+    }
+
+    /// Load the model bounds used to measure how close a player stands to an object
+    pub async fn load_display_bounds(&self) -> Result<()> {
+        let rows: Vec<(i32, f32, f32, f32, f32, f32, f32)> = sqlx::query_as(
+            "SELECT display_id, min_x, min_y, min_z, max_x, max_y, max_z \
+             FROM world.gameobject_display_info_addon",
+        )
+        .fetch_all(&*self.world_db)
+        .await
+        .context("Failed to load gameobject display bounds")?;
+        for (display_id, min_x, min_y, min_z, max_x, max_y, max_z) in rows {
+            self.set_display_bounds(
+                checked_u32(i64::from(display_id), "gameobject_display_info_addon.display_id")?,
+                [min_x, min_y, min_z, max_x, max_y, max_z],
+            );
+        }
+        tracing::info!("Loaded {} gameobject display bounds", self.display_bounds.len());
+        Ok(())
+    }
+
+    /// A model's bounds (min x/y/z, max x/y/z), when it has any.
+    pub fn display_bounds(&self, display_id: u32) -> Option<[f32; 6]> {
+        self.display_bounds
+            .get(&display_id)
+            .map(|b| *b)
+            .filter(|b| b.iter().any(|v| *v != 0.0))
+    }
+
+    pub fn set_display_bounds(&self, display_id: u32, bounds: [f32; 6]) {
+        self.display_bounds.insert(display_id, bounds);
     }
 
     /// Load gameobject spawns from database

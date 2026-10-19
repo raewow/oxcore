@@ -89,8 +89,6 @@ field logic is Lua (`scripts/battlegrounds/`).
   options using them stay hidden. Instance script checks (18) are answered by
   Temple of Ahn'Qiraj only; Blackwing Lair's scepter run and Zul'Gurub's
   Thekal checks are not scripted.
-- **Game object reach is approximate.** Choosing a game object's option
-  allows a fixed reach around its centre instead of measuring its bounds.
 - **English only.** Localised option, box, point-of-interest and quest
   greeting texts are not loaded.
 - **Deliberate differences.** A gossip NPC with no menu and nothing else to
