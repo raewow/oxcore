@@ -72,6 +72,8 @@ pub enum ScriptTable {
     CreatureMovement,
     /// Scripts started by spell and game object events (event_scripts).
     Event,
+    /// Scripts started by gossip greetings and options (gossip_scripts).
+    Gossip,
 }
 
 impl ScriptTable {
@@ -82,15 +84,17 @@ impl ScriptTable {
             ScriptTable::CreatureSpells => "creature_spells_scripts",
             ScriptTable::CreatureMovement => "creature_movement_scripts",
             ScriptTable::Event => "event_scripts",
+            ScriptTable::Gossip => "gossip_scripts",
         }
     }
 
-    const ALL: [ScriptTable; 5] = [
+    const ALL: [ScriptTable; 6] = [
         ScriptTable::CreatureAi,
         ScriptTable::Generic,
         ScriptTable::CreatureSpells,
         ScriptTable::CreatureMovement,
         ScriptTable::Event,
+        ScriptTable::Gossip,
     ];
 }
 
@@ -222,6 +226,20 @@ pub fn start(world: &World, table: ScriptTable, id: u32, source: Option<ObjectGu
             target,
         });
     }
+}
+
+/// Whether a step of the script is waiting to run for this source and target.
+#[cfg(test)]
+pub fn is_scheduled(
+    table: ScriptTable,
+    id: u32,
+    source: Option<ObjectGuid>,
+    target: Option<ObjectGuid>,
+) -> bool {
+    queue()
+        .lock()
+        .iter()
+        .any(|s| s.table == table && s.id == id && s.source == source && s.target == target)
 }
 
 /// Run the steps whose time has come.

@@ -51,7 +51,7 @@ impl GossipManager {
             self.add_menu(GossipMenu {
                 entry: row.entry.try_into()?,
                 text_id: row.text_id.try_into()?,
-                script_id: 0,
+                script_id: row.script_id.try_into()?,
                 condition_id: row.condition_id.try_into()?,
             });
         }

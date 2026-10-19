@@ -571,3 +571,53 @@ async fn guild_options_open_their_windows() {
         assert!(packets.contains(&opcode), "{opcode:?} not sent: {packets:?}");
     }
 }
+
+// ========== SCRIPTS ==========
+
+fn script_step() -> crate::game::db_scripts::ScriptInfo {
+    crate::game::db_scripts::ScriptInfo::default()
+}
+
+#[tokio::test]
+async fn greeting_starts_its_menu_script() {
+    use crate::game::db_scripts::{insert_script, is_scheduled, ScriptTable};
+    let world = test_world();
+    let (player, _rx) = add_player(&world, 1);
+    let npc = add_npc(&world, NPC_FLAG_GOSSIP);
+    insert_script(ScriptTable::Gossip, 7001, vec![script_step()]);
+    world.systems.gossip_manager.add_menu(GossipMenu {
+        entry: MENU,
+        text_id: 1,
+        script_id: 7001,
+        condition_id: 0,
+    });
+
+    world.systems.gossip.gossip_text_id(&world, player, npc, MENU);
+
+    assert!(is_scheduled(ScriptTable::Gossip, 7001, Some(npc), Some(player)));
+}
+
+#[tokio::test]
+async fn option_starts_its_script() {
+    use crate::game::db_scripts::{insert_script, is_scheduled, ScriptTable};
+    let world = test_world();
+    let (player, _rx) = add_player(&world, 1);
+    let npc = add_npc(&world, NPC_FLAG_GOSSIP);
+    insert_script(ScriptTable::Gossip, 7002, vec![script_step()]);
+    world.managers.player_mgr.with_player_mut(player, |p| {
+        p.gossip = PlayerGossipMenu {
+            source: npc,
+            menu_id: MENU,
+            options: vec![PreparedGossipOption {
+                action: gossip_option::GOSSIP,
+                action_script: 7002,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+    });
+
+    world.systems.gossip.on_gossip_select(&world, player, npc, 0).await.unwrap();
+
+    assert!(is_scheduled(ScriptTable::Gossip, 7002, Some(npc), Some(player)));
+}

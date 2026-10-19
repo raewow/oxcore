@@ -16,6 +16,7 @@ use super::types::{
 use crate::game::broadcast_mgr::{BroadcastManager, BroadcastManagerExt};
 use crate::game::conditions::ConditionContext;
 use crate::game::creature::CreatureManager;
+use crate::game::db_scripts::{self, ScriptTable};
 use crate::game::gameobject::GameObjectType;
 use crate::game::npc::quest::types::GossipQuestData;
 use crate::game::npc::trainer::types::trainer_type;
@@ -528,6 +529,23 @@ impl GossipSystem {
             }
         }
 
+        // An option's script runs with the creature acting on the player; a game object's
+        // runs from the player towards the object.
+        if option.action_script != 0 {
+            let (source, target) = if source_guid.is_game_object() {
+                (player_guid, source_guid)
+            } else {
+                (source_guid, player_guid)
+            };
+            db_scripts::start(
+                world,
+                ScriptTable::Gossip,
+                option.action_script,
+                Some(source),
+                Some(target),
+            );
+        }
+
         Ok(())
     }
 
@@ -555,7 +573,8 @@ impl GossipSystem {
 
     /// The greeting for `menu_id`: of the rows whose condition the player meets, the one
     /// with the highest condition id; an unconditioned row only counts when no
-    /// conditioned row is met.
+    /// conditioned row is met. The chosen row's gossip script starts, with the source
+    /// acting on the player.
     pub fn gossip_text_id(
         &self,
         world: &World,
@@ -567,6 +586,7 @@ impl GossipSystem {
             return DEFAULT_GOSSIP_MESSAGE;
         }
         let mut text_id = DEFAULT_GOSSIP_MESSAGE;
+        let mut script_id = 0;
         let mut best_condition = 0;
         for menu in self.manager.get_menus(menu_id) {
             let fits = if menu.condition_id == 0 {
@@ -578,7 +598,17 @@ impl GossipSystem {
             if fits {
                 best_condition = menu.condition_id;
                 text_id = menu.text_id;
+                script_id = menu.script_id;
             }
+        }
+        if script_id != 0 {
+            db_scripts::start(
+                world,
+                ScriptTable::Gossip,
+                script_id,
+                Some(source_guid),
+                Some(player_guid),
+            );
         }
         text_id
     }

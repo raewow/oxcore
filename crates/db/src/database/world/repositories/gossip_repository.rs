@@ -11,6 +11,7 @@ use std::sync::Arc;
 pub struct GossipMenuRow {
     pub entry: i64,
     pub text_id: i64,
+    pub script_id: i64,
     pub condition_id: i64,
 }
 
@@ -143,7 +144,7 @@ impl GossipRepository {
     /// Load gossip menus from gossip_menu table
     async fn load_gossip_menus(&self) -> Result<Vec<GossipMenuRow>> {
         sqlx::query_as::<_, GossipMenuRow>(
-            "SELECT entry::BIGINT AS entry, text_id, condition_id FROM world.gossip_menu",
+            "SELECT entry::BIGINT AS entry, text_id, script_id, condition_id FROM world.gossip_menu",
         )
         .fetch_all(&*self.pool)
         .await
