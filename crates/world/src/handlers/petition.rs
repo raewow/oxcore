@@ -36,6 +36,14 @@ const ERR_ALREADY_INVITED_TO_GUILD_S: u32 = 0x05;
 const ERR_GUILD_NAME_EXISTS_S: u32 = 0x07;
 const ERR_GUILD_NOT_ALLIED: u32 = 0x0C;
 
+/// Signatures a charter needs before it can be turned in, from the configuration.
+fn required_signatures(world: &World) -> u32 {
+    world
+        .config
+        .min_petition_signs
+        .unwrap_or(oxcore_shared::game::petition::GUILD_CHARTER_SIGNATURES)
+}
+
 /// What saving a tabard design costs, in copper.
 const GUILD_EMBLEM_COST: u32 = 100_000;
 
@@ -278,7 +286,11 @@ pub async fn handle_petition_sign(
         debug!("No charter {:?} for {:?} to sign", charter, player);
         return Ok(());
     };
-    if petition.is_complete() {
+    // The client shows at most nine names.
+    if petition.is_complete(required_signatures(world))
+        || petition.signatures.len() as u32
+            >= oxcore_shared::game::petition::GUILD_CHARTER_SIGNATURES
+    {
         return Ok(());
     }
 
@@ -432,7 +444,7 @@ pub async fn handle_turn_in_petition(
     if petition.owner != player {
         return Ok(());
     }
-    if !petition.is_complete() {
+    if !petition.is_complete(required_signatures(world)) {
         return turn_in_result(PetitionResult::NeedMoreSignatures);
     }
     if guild.has_guild_name(&petition.name) {

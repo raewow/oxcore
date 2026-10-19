@@ -33,8 +33,10 @@ pub struct Petition {
 }
 
 impl Petition {
-    pub fn is_complete(&self) -> bool {
-        self.signatures.len() as u32 >= GUILD_CHARTER_SIGNATURES
+    /// Whether the charter has the `required` signatures (at most nine, which the client
+    /// can show).
+    pub fn is_complete(&self, required: u32) -> bool {
+        self.signatures.len() as u32 >= required.min(GUILD_CHARTER_SIGNATURES)
     }
 
     pub fn signed_by(&self, player: ObjectGuid, account: u32) -> bool {
@@ -225,7 +227,7 @@ mod tests {
                     player_account: signer,
                 },
             );
-            assert!(!book.get(id).unwrap().is_complete());
+            assert!(!book.get(id).unwrap().is_complete(9));
         }
         book.add_signature(
             id,
@@ -235,7 +237,8 @@ mod tests {
             },
         );
         let petition = book.get(id).unwrap();
-        assert!(petition.is_complete());
+        assert!(petition.is_complete(9));
+        assert!(book.get(id).unwrap().is_complete(3));
         assert!(petition.signed_by(ObjectGuid::new_player(3), 0));
         assert!(petition.signed_by(ObjectGuid::new_player(99), 4));
         assert_eq!(book.by_owner(owner).map(|p| p.id), Some(id));
