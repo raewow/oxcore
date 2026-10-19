@@ -179,9 +179,11 @@ pub async fn handle_gossip_hello(
     // Spirit guides send the battleground resurrection-wave timer when greeted.
     const NPC_FLAG_SPIRITGUIDE: u32 = 0x00000040;
     if (npc_flags & NPC_FLAG_SPIRITGUIDE) != 0 {
+        let time_left_ms =
+            crate::game::battleground::system::spirit_healer_time(world, player_guid).unwrap_or(0);
         session.send_msg(oxcore_shared::messages::death::SmsgAreaSpiritHealerTime {
             healer_guid: npc_guid,
-            time_left_ms: 0,
+            time_left_ms,
         })?;
     }
 

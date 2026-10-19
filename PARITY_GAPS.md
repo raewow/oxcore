@@ -73,6 +73,29 @@ field logic is Lua (`scripts/battlegrounds/`).
 - **Reputation discount is a stub.** `calculate_reputation_discount` in
   `game/vendor/system.rs` always returns Neutral, so vendors never discount.
 
+## Gossip
+
+- **Stable masters do nothing.** There is no pet stable, so the stable option
+  (shown to hunters) opens nothing and MSG_LIST_STABLED_PETS is unhandled.
+- **Pet skills cannot be untrained.** Hunter pets keep no spell book, so the
+  untrain option never shows.
+- **Love is in the Air greetings.** The Amorous aura (26869) should swap a
+  city NPC's menu for its holiday one; creature dummy auras have no apply or
+  remove hook yet.
+- **Guild charters and tabards only open their windows.** Buying and signing
+  charters and saving a tabard design are not handled.
+- **Some gossip conditions are rejected.** Saved variables (11), instance
+  script checks (18), object flags (31), scripted map events (36) and explored
+  areas (59) are not evaluated, so the few menus and options using them stay
+  hidden.
+- **Game object reach is approximate.** Choosing a game object's option
+  allows a fixed reach around its centre instead of measuring its bounds.
+- **English only.** Localised option, box, point-of-interest and quest
+  greeting texts are not loaded.
+- **Deliberate differences.** A gossip NPC with no menu and nothing else to
+  offer opens its quests directly instead of a placeholder greeting, and
+  quest-giver hello is refused for creatures with no NPC flags.
+
 ## Not verified
 
 - The 31 database-backed tests (ignored without a database) and live 1.12 and
