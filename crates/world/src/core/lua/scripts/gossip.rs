@@ -37,18 +37,21 @@ impl LuaGossipScript {
         })
     }
 
-    /// Called when a player selects a gossip option.
+    /// Called when a player selects a gossip option: `OnGossipSelect(player, npc, sender,
+    /// action, code)`, where `code` is what the player typed for a coded option and nil
+    /// otherwise. Database options arrive with sender 0 and their option type as action.
     pub fn on_gossip_select(
         &self,
         lua: &Lua,
         player: &PlayerSnapshot,
         npc_guid: ObjectGuid,
-        menu_id: u32,
-        option_id: u32,
+        sender: u32,
+        action: u32,
+        code: Option<&str>,
     ) -> Vec<LuaAction> {
         self.call_callback_with_extra(lua, "OnGossipSelect", player, |_lua, table, input| {
             let func: Function = table.get("OnGossipSelect")?;
-            func.call((table.clone(), input, LuaGuid(npc_guid), menu_id, option_id))
+            func.call((table.clone(), input, LuaGuid(npc_guid), sender, action, code))
         })
     }
 

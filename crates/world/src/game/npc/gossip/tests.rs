@@ -708,3 +708,120 @@ async fn script_command_swaps_the_creature_menu() {
     world.systems.gossip.gossip_hello(&world, player, npc).await.unwrap();
     assert_eq!(shown_texts(&world, player), vec!["option 0"]);
 }
+
+// ========== SCRIPTED MENUS ==========
+
+fn install_select_recorder(world: &World) {
+    world.managers.lua_mgr.with_lua(|lua| {
+        lua.load(
+            r#"
+            _G.picked = nil
+            _G.recorder = {
+                OnGossipSelect = function(self, player, npc, sender, action, code)
+                    _G.picked = sender .. ":" .. action .. ":" .. tostring(code)
+                    return { { action = "GOSSIP_CLOSE" } }
+                end,
+            }
+            "#,
+        )
+        .exec()
+        .expect("script should load");
+        let table: mlua::Table = lua.globals().get("recorder").expect("table exists");
+        world
+            .managers
+            .lua_mgr
+            .register_gossip_script_table(ENTRY, table);
+    });
+}
+
+fn picked(world: &World) -> Option<String> {
+    world
+        .managers
+        .lua_mgr
+        .with_lua(|lua| lua.globals().get::<Option<String>>("picked").unwrap())
+}
+
+#[tokio::test]
+async fn script_menu_options_return_sender_and_action() {
+    use crate::core::lua::actions::LuaAction;
+    use crate::core::lua::{build_player_snapshot, execute_gossip_actions};
+    let world = test_world();
+    let (player, mut rx) = add_player(&world, 1);
+    let npc = add_npc(&world, NPC_FLAG_GOSSIP);
+    install_select_recorder(&world);
+
+    execute_gossip_actions(
+        vec![
+            LuaAction::GossipOption {
+                sender: 5,
+                id: 9,
+                icon: 0,
+                text: "Tell me more".to_string(),
+                coded: true,
+                box_text: String::new(),
+                box_money: 0,
+            },
+            LuaAction::GossipSend,
+        ],
+        player,
+        npc,
+        &world,
+    )
+    .await
+    .unwrap();
+
+    assert!(opcodes(&sent(&mut rx)).contains(&Opcode::SMSG_GOSSIP_MESSAGE));
+    let option = world.systems.gossip.shown_option(player, npc, 0).unwrap();
+    assert_eq!((option.sender, option.action), (5, 9));
+
+    let script = world.managers.lua_mgr.get_gossip_script(ENTRY).unwrap();
+    let snapshot = build_player_snapshot(player, &world);
+    let actions = world
+        .managers
+        .lua_mgr
+        .with_lua(|lua| script.on_gossip_select(lua, &snapshot, npc, 5, 9, Some("abc")));
+    assert_eq!(actions.len(), 1);
+    assert_eq!(picked(&world).as_deref(), Some("5:9:abc"));
+}
+
+#[tokio::test]
+async fn coded_option_needs_a_code() {
+    use crate::handlers::gossip_handler::handle_gossip_select_option;
+    let world = test_world();
+    let (tx, _session_rx) = mpsc::unbounded_channel();
+    let session = Arc::new(WorldSession::new(2, 2, "Coder".to_string(), 0, tx));
+    let (player, _rx) = add_player(&world, 1);
+    session.set_player_guid(Some(player));
+    let npc = add_npc(&world, NPC_FLAG_GOSSIP);
+    install_select_recorder(&world);
+    world.managers.player_mgr.with_player_mut(player, |p| {
+        p.gossip = PlayerGossipMenu {
+            source: npc,
+            options: vec![PreparedGossipOption {
+                coded: true,
+                sender: 1,
+                action: 2,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+    });
+
+    let select = |code: &str| {
+        let mut packet = WorldPacket::new(Opcode::CMSG_GOSSIP_SELECT_OPTION);
+        packet.write_u64(npc.raw());
+        packet.write_u32(0);
+        packet.write_cstring(code);
+        packet
+    };
+
+    handle_gossip_select_option(&session, &mut select(""), &world)
+        .await
+        .unwrap();
+    assert_eq!(picked(&world), None);
+
+    handle_gossip_select_option(&session, &mut select("1234"), &world)
+        .await
+        .unwrap();
+    assert_eq!(picked(&world).as_deref(), Some("1:2:1234"));
+}

@@ -262,12 +262,16 @@ pub enum LuaAction {
     /// Set gossip menu text.
     GossipMenu { npc_text_id: u32 },
 
-    /// Add gossip option.
+    /// Add gossip option. `sender` and `id` come back to `OnGossipSelect` when the player
+    /// picks it.
     GossipOption {
+        sender: u32,
         id: u32,
         icon: u8,
         text: String,
         coded: bool,
+        box_text: String,
+        box_money: u32,
     },
 
     /// Add quest to gossip menu.
@@ -678,10 +682,14 @@ impl LuaAction {
                     .ok()?,
             }),
             "GOSSIP_OPTION" => Some(LuaAction::GossipOption {
+                // Scripts name the main menu sender 1 unless they say otherwise.
+                sender: table.get("sender").unwrap_or(1),
                 id: table.get("id").ok()?,
                 icon: table.get("icon").unwrap_or(0),
                 text: table.get("text").ok()?,
                 coded: table.get("coded").unwrap_or(false),
+                box_text: table.get("box_text").unwrap_or_default(),
+                box_money: table.get("box_money").unwrap_or(0),
             }),
             "GOSSIP_QUEST" => Some(LuaAction::GossipQuest {
                 quest_id: table.get("quest_id").ok()?,

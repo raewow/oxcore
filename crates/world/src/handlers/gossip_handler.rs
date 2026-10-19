@@ -265,14 +265,17 @@ pub async fn handle_gossip_select_option(
         .unwrap_or(0);
     if npc_entry > 0 {
         if let Some(script) = world.managers.lua_mgr.get_gossip_script(npc_entry) {
-            let menu_id = world
-                .managers
-                .player_mgr
-                .with_player(player_guid, |p| p.gossip.menu_id)
-                .unwrap_or(0);
             let player_snap = build_player_snapshot(player_guid, world);
+            let code = option.coded.then_some(code.as_str());
             let actions = world.managers.lua_mgr.with_lua(|lua| {
-                script.on_gossip_select(lua, &player_snap, source_guid, menu_id, list_index)
+                script.on_gossip_select(
+                    lua,
+                    &player_snap,
+                    source_guid,
+                    option.sender,
+                    option.action,
+                    code,
+                )
             });
             if !actions.is_empty() {
                 execute_gossip_actions(actions, player_guid, source_guid, world).await?;

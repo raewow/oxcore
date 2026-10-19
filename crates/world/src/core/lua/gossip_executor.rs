@@ -9,7 +9,7 @@ use tracing::debug;
 
 use super::actions::LuaAction;
 use super::snapshot::PlayerSnapshot;
-use crate::game::npc::gossip::{PlayerGossipMenu, PreparedGossipOption};
+use crate::game::npc::gossip::{gossip_option, PlayerGossipMenu, PreparedGossipOption};
 use crate::World;
 use oxcore_shared::messages::gossip::{
     GossipOptionData, GossipQuestData, SmsgGossipComplete, SmsgGossipMessage,
@@ -47,6 +47,16 @@ fn faction_from_race(race: u8) -> u32 {
     }
 }
 
+/// How a quest appears in a script's menu: ready to hand in, under way, or on offer.
+fn quest_icon(world: &World, player_guid: ObjectGuid, quest_id: u32) -> u32 {
+    use crate::game::npc::quest::types::{DialogStatus, QuestStatus};
+    match world.systems.quest.get_quest_status(player_guid, quest_id) {
+        QuestStatus::Complete => DialogStatus::RewardRep as u32,
+        QuestStatus::Incomplete => DialogStatus::Incomplete as u32,
+        _ => DialogStatus::Available as u32,
+    }
+}
+
 /// Execute `LuaAction`s returned by a gossip/zone script callback.
 ///
 /// Actions that build up a gossip menu are accumulated and sent together
@@ -63,9 +73,8 @@ pub async fn execute_gossip_actions(
 ) -> Result<()> {
     // Accumulate gossip menu state until GossipSend
     let mut npc_text_id: u32 = 0;
-    let mut gossip_options: Vec<GossipOptionData> = Vec::new();
-    let mut gossip_quests: Vec<GossipQuestData> = Vec::new();
-    let mut option_index: u32 = 0;
+    let mut gossip_options: Vec<PreparedGossipOption> = Vec::new();
+    let mut gossip_quests: Vec<crate::game::npc::quest::types::GossipQuestData> = Vec::new();
 
     for action in actions {
         match action {
@@ -74,55 +83,62 @@ pub async fn execute_gossip_actions(
                 npc_text_id = id;
             }
             LuaAction::GossipOption {
-                id: _,
+                sender,
+                id,
                 icon,
                 text,
                 coded,
+                box_text,
+                box_money,
             } => {
-                gossip_options.push(GossipOptionData {
-                    index: option_index,
+                gossip_options.push(PreparedGossipOption {
                     icon,
-                    coded,
-                    money: 0,
                     text,
+                    coded,
+                    box_text,
+                    box_money,
+                    sender,
+                    action: id,
+                    ..Default::default()
                 });
-                option_index += 1;
             }
             LuaAction::GossipQuest { quest_id } => {
-                // Look up quest title/level for the gossip entry
                 if let Some(quest) = world.systems.quest.manager.get_quest_template(quest_id) {
-                    gossip_quests.push(GossipQuestData {
+                    gossip_quests.push(crate::game::npc::quest::types::GossipQuestData {
                         quest_id,
-                        icon: 2, // default available icon
+                        icon: quest_icon(world, player_guid, quest_id),
                         level: quest.quest_level as u32,
                         title: quest.title.clone(),
                     });
                 }
             }
             LuaAction::GossipSend => {
+                let options = gossip_options
+                    .iter()
+                    .enumerate()
+                    .map(|(index, o)| GossipOptionData {
+                        index: index as u32,
+                        icon: o.icon,
+                        coded: o.coded,
+                        money: o.box_money,
+                        text: o.text.clone(),
+                    })
+                    .collect();
+                let quests = gossip_quests
+                    .iter()
+                    .map(|q| GossipQuestData {
+                        quest_id: q.quest_id,
+                        icon: q.icon,
+                        level: q.level,
+                        title: q.title.clone(),
+                    })
+                    .collect();
                 // Remember what the player was shown so their pick can be checked.
                 let shown = PlayerGossipMenu {
                     source: npc_guid,
                     menu_id: 0,
-                    options: gossip_options
-                        .iter()
-                        .map(|o| PreparedGossipOption {
-                            icon: o.icon,
-                            text: o.text.clone(),
-                            coded: o.coded,
-                            action: o.index,
-                            ..Default::default()
-                        })
-                        .collect(),
-                    quests: gossip_quests
-                        .iter()
-                        .map(|q| crate::game::npc::quest::types::GossipQuestData {
-                            quest_id: q.quest_id,
-                            icon: q.icon,
-                            level: q.level,
-                            title: q.title.clone(),
-                        })
-                        .collect(),
+                    options: std::mem::take(&mut gossip_options),
+                    quests: std::mem::take(&mut gossip_quests),
                     discovered_node: false,
                 };
                 world
@@ -133,15 +149,14 @@ pub async fn execute_gossip_actions(
                     source_guid: npc_guid,
                     menu_id: 0,
                     text_id: npc_text_id,
-                    options: std::mem::take(&mut gossip_options),
-                    quests: std::mem::take(&mut gossip_quests),
+                    options,
+                    quests,
                 };
                 world
                     .managers
                     .broadcast_mgr
                     .send_msg_to_player(player_guid, msg);
                 npc_text_id = 0;
-                option_index = 0;
             }
             LuaAction::GossipClose => {
                 world
@@ -165,10 +180,25 @@ pub async fn execute_gossip_actions(
             | LuaAction::SendBanker
             | LuaAction::SendAuctioneer
             | LuaAction::SendInnkeeper => {
-                debug!(
-                    "Gossip executor: NPC window action not yet implemented: {:?}",
-                    action
-                );
+                let service = match action {
+                    LuaAction::SendTrainer => gossip_option::TRAINER,
+                    LuaAction::SendBanker => gossip_option::BANKER,
+                    LuaAction::SendAuctioneer => gossip_option::AUCTIONEER,
+                    _ => gossip_option::INNKEEPER,
+                };
+                world
+                    .systems
+                    .gossip
+                    .perform_option(
+                        world,
+                        player_guid,
+                        npc_guid,
+                        &PreparedGossipOption {
+                            action: service,
+                            ..Default::default()
+                        },
+                    )
+                    .await?;
             }
 
             // ==================== Creature state ====================

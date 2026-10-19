@@ -376,6 +376,19 @@ impl GossipSystem {
             return Ok(());
         }
 
+        self.perform_option(world, player_guid, source_guid, &option)
+            .await
+    }
+
+    /// Does what an option of type `option.action` offers: opens a sub-menu or a service
+    /// window, then starts the option's script.
+    pub async fn perform_option(
+        &self,
+        world: &World,
+        player_guid: ObjectGuid,
+        source_guid: ObjectGuid,
+        option: &PreparedGossipOption,
+    ) -> Result<()> {
         match option.action {
             gossip_option::GOSSIP => {
                 if option.action_poi != 0 {
