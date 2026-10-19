@@ -79,9 +79,6 @@ field logic is Lua (`scripts/battlegrounds/`).
   (shown to hunters) opens nothing and MSG_LIST_STABLED_PETS is unhandled.
 - **Pet skills cannot be untrained.** Hunter pets keep no spell book, so the
   untrain option never shows.
-- **Love is in the Air greetings.** The Amorous aura (26869) should swap a
-  city NPC's menu for its holiday one; creature dummy auras have no apply or
-  remove hook yet.
 - **Guild charters and tabards only open their windows.** Buying and signing
   charters and saving a tabard design are not handled.
 - **Some gossip conditions are rejected.** Saved variables (11), scripted map
@@ -89,8 +86,9 @@ field logic is Lua (`scripts/battlegrounds/`).
   options using them stay hidden. Instance script checks (18) are answered by
   Temple of Ahn'Qiraj only; Blackwing Lair's scepter run and Zul'Gurub's
   Thekal checks are not scripted.
-- **English only.** Localised option, box, point-of-interest and quest
-  greeting texts are not loaded.
+- **English only.** The world server has no client locale, so localised
+  option, box, point-of-interest and quest greeting texts are not loaded
+  (nor are any other localised texts).
 - **Deliberate differences.** A gossip NPC with no menu and nothing else to
   offer opens its quests directly instead of a placeholder greeting, and
   quest-giver hello is refused for creatures with no NPC flags.

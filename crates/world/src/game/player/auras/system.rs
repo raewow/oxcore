@@ -3780,7 +3780,11 @@ impl AuraSystem {
         aura: Aura,
         world: &World,
     ) {
+        let amorous = aura.spell_id == crate::game::npc::gossip::holiday::SPELL_AMOROUS;
         self.apply_creature_aura_record_with_mgr(creature_guid, aura, &world.managers.creature_mgr);
+        if amorous {
+            crate::game::npc::gossip::holiday::amorous_changed(world, creature_guid);
+        }
 
         if world
             .managers
@@ -3911,6 +3915,9 @@ impl AuraSystem {
             effect_index,
             &world.managers.creature_mgr,
         );
+        if spell_id == crate::game::npc::gossip::holiday::SPELL_AMOROUS {
+            crate::game::npc::gossip::holiday::amorous_changed(world, creature_guid);
+        }
     }
 
     /// Core creature aura removal logic, taking CreatureManager directly for testability.

@@ -70,8 +70,12 @@ fn add_player(world: &World, class: u8) -> (ObjectGuid, mpsc::UnboundedReceiver<
 
 /// A creature using gossip menu `MENU` with the given NPC flags.
 fn add_npc(world: &World, npc_flags: u32) -> ObjectGuid {
+    add_npc_entry(world, ENTRY, npc_flags)
+}
+
+fn add_npc_entry(world: &World, entry: u32, npc_flags: u32) -> ObjectGuid {
     let template = CreatureTemplate {
-        entry: ENTRY,
+        entry,
         name: "Gossiper".to_string(),
         subname: None,
         min_level: 1,
@@ -108,10 +112,10 @@ fn add_npc(world: &World, npc_flags: u32) -> ObjectGuid {
         ai: Default::default(),
     };
     world.managers.creature_mgr.add_template(template.clone());
-    let guid = ObjectGuid::new_creature(ENTRY, 1);
+    let guid = ObjectGuid::new_creature(entry, 1);
     world.managers.creature_mgr.add_creature(Creature::new(
         guid,
-        ENTRY,
+        entry,
         1,
         Position::default(),
         0,
@@ -930,4 +934,46 @@ async fn quest_list_uses_the_quest_greeting() {
         .expect("quest list sent");
     let title_end = list.data()[8..].iter().position(|&b| b == 0).unwrap() + 8;
     assert_eq!(&list.data()[8..title_end], b"Work for you, $N.");
+}
+
+// ========== LOVE IS IN THE AIR ==========
+
+#[tokio::test]
+async fn amorous_guard_greets_with_the_holiday_menu() {
+    use crate::game::npc::gossip::holiday::{amorous_changed, SPELL_AMOROUS};
+    use crate::game::player::auras::{Aura, AuraFlags};
+    const GUARD: u32 = 68;
+    let world = test_world();
+    let guard = add_npc_entry(&world, GUARD, 0);
+    let gossip = &world.systems.gossip;
+    assert_eq!(gossip.default_menu_id(&world, guard), MENU);
+
+    world.managers.creature_mgr.with_creature_mut(guard, |c| {
+        c.add_aura(Aura::new(
+            SPELL_AMOROUS,
+            ObjectGuid::empty(),
+            0,
+            23,
+            0,
+            0,
+            None,
+            0,
+            1,
+            0,
+            AuraFlags::default(),
+        ));
+    });
+    amorous_changed(&world, guard);
+    assert_eq!(gossip.default_menu_id(&world, guard), 6957);
+    let flags = world.managers.creature_mgr.with_creature(guard, |c| c.npc_flags);
+    assert_eq!(flags, Some(NPC_FLAG_GOSSIP));
+
+    world
+        .managers
+        .creature_mgr
+        .with_creature_mut(guard, |c| c.remove_aura(SPELL_AMOROUS));
+    amorous_changed(&world, guard);
+    assert_eq!(gossip.default_menu_id(&world, guard), MENU);
+    let flags = world.managers.creature_mgr.with_creature(guard, |c| c.npc_flags);
+    assert_eq!(flags, Some(0));
 }

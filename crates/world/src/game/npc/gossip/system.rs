@@ -130,6 +130,10 @@ impl GossipSystem {
                 .map(|t| t.gossip_menu_id())
                 .unwrap_or(0);
         }
+        // Love is in the Air swaps a city NPC's menu while it is Amorous.
+        if let Some(menu) = super::holiday::amorous_menu(world, source) {
+            return menu;
+        }
         self.creature_mgr
             .with_creature(source, |c| c.gossip_menu_id)
             .unwrap_or(0)

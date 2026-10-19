@@ -2,6 +2,7 @@
 //!
 //! Handles gossip menu interactions between players and NPCs.
 
+pub mod holiday;
 pub mod manager;
 pub mod system;
 #[cfg(test)]
