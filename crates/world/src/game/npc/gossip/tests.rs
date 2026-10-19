@@ -825,3 +825,109 @@ async fn coded_option_needs_a_code() {
         .unwrap();
     assert_eq!(picked(&world).as_deref(), Some("1:2:1234"));
 }
+
+// ========== LOAD CHECKS ==========
+
+#[tokio::test]
+async fn menu_rows_need_their_text_and_script() {
+    use crate::game::npc::gossip::types::NpcText;
+    let world = test_world();
+    let gossip = &world.systems.gossip_manager;
+    gossip.add_npc_text(NpcText::new(1));
+
+    assert!(gossip.checked_menu(menu_row(MENU, 1, 0)).is_some());
+    assert!(gossip.checked_menu(menu_row(MENU, 2, 0)).is_none());
+    let mut scripted = menu_row(MENU, 1, 0);
+    scripted.script_id = 999_999;
+    assert!(gossip.checked_menu(scripted).is_none());
+}
+
+#[tokio::test]
+async fn options_are_repaired_or_dropped_at_load() {
+    let world = test_world();
+    let gossip = &world.systems.gossip_manager;
+    gossip.add_menu(menu_row(MENU, 1, 0));
+
+    assert!(gossip
+        .checked_menu_item(option(MENU + 1, 0, gossip_option::GOSSIP, 1, 0))
+        .is_none());
+
+    let mut item = option(MENU, 0, gossip_option::GOSSIP, 1, 0);
+    item.option_icon = 30;
+    item.option_broadcast_text = 4242;
+    item.box_broadcast_text = 4343;
+    item.action_poi_id = 77;
+    let item = gossip.checked_menu_item(item).expect("option kept");
+    assert_eq!(item.option_icon, 0);
+    assert_eq!(item.option_broadcast_text, 0);
+    assert_eq!(item.box_broadcast_text, 0);
+    assert_eq!(item.action_poi_id, 0);
+}
+
+#[tokio::test]
+async fn missing_conditions_are_cleared() {
+    let world = test_world();
+    let (player, _rx) = add_player(&world, 1);
+    let npc = add_npc(&world, NPC_FLAG_GOSSIP);
+    let gossip = &world.systems.gossip_manager;
+    gossip.add_menu(menu_row(MENU, 1, 0));
+    gossip.add_menu_item(option(MENU, 0, gossip_option::GOSSIP, NPC_FLAG_GOSSIP, 4040));
+
+    gossip.drop_missing_conditions(&world.managers.condition_mgr);
+    world.systems.gossip.prepare_gossip_menu(&world, player, npc, MENU);
+
+    assert_eq!(shown_texts(&world, player), vec!["option 0"]);
+}
+
+#[tokio::test]
+async fn menu_shows_at_most_fifteen_options() {
+    let world = test_world();
+    let (player, _rx) = add_player(&world, 1);
+    let npc = add_npc(&world, NPC_FLAG_GOSSIP);
+    let gossip = &world.systems.gossip_manager;
+    gossip.add_menu(menu_row(MENU, 1, 0));
+    for id in 0..20 {
+        gossip.add_menu_item(option(MENU, id, gossip_option::GOSSIP, NPC_FLAG_GOSSIP, 0));
+    }
+
+    world.systems.gossip.prepare_gossip_menu(&world, player, npc, MENU);
+
+    assert_eq!(shown_texts(&world, player).len(), 15);
+}
+
+#[tokio::test]
+async fn quest_list_uses_the_quest_greeting() {
+    use crate::game::npc::gossip::types::QuestGreeting;
+    use crate::game::npc::quest::types::QuestTemplate;
+    let world = test_world();
+    let (player, mut rx) = add_player(&world, 1);
+    let npc = add_npc(&world, 0x02);
+    for id in [21, 22] {
+        world.systems.quest.manager.add_quest_template(QuestTemplate {
+            id,
+            title: format!("Quest {id}"),
+            quest_level: 5,
+            ..QuestTemplate::default()
+        });
+        world.systems.quest.manager.add_creature_quest_starter(ENTRY, id);
+    }
+    world.systems.gossip_manager.add_quest_greeting(
+        ENTRY,
+        0,
+        QuestGreeting {
+            text: "Work for you, $N.".to_string(),
+            emote: 1,
+            emote_delay: 0,
+        },
+    );
+
+    world.systems.gossip.gossip_hello(&world, player, npc).await.unwrap();
+
+    let packets = sent(&mut rx);
+    let list = packets
+        .iter()
+        .find(|p| p.opcode() == Opcode::SMSG_QUESTGIVER_QUEST_LIST)
+        .expect("quest list sent");
+    let title_end = list.data()[8..].iter().position(|&b| b == 0).unwrap() + 8;
+    assert_eq!(&list.data()[8..title_end], b"Work for you, $N.");
+}

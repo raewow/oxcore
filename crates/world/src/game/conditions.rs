@@ -63,6 +63,11 @@ impl ConditionManager {
         self.entries.insert(id, entry);
     }
 
+    /// Whether a condition with this id was loaded.
+    pub fn contains(&self, id: u32) -> bool {
+        self.entries.contains_key(&id)
+    }
+
     pub fn is_satisfied(&self, id: u32, context: ConditionContext, world: &World) -> bool {
         self.evaluate(id, context, world, &mut HashSet::new())
     }

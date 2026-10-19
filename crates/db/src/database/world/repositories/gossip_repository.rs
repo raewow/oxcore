@@ -116,6 +116,16 @@ pub struct PointOfInterestRow {
     pub icon_name: String,
 }
 
+/// Row structure for quest_greeting
+#[derive(sqlx::FromRow)]
+pub struct QuestGreetingRow {
+    pub entry: i64,
+    pub r#type: i16,
+    pub content_default: String,
+    pub emote_id: i64,
+    pub emote_delay: i64,
+}
+
 /// Gossip data loaded from database
 pub struct GossipLoadData {
     pub menus: Vec<GossipMenuRow>,
@@ -124,6 +134,7 @@ pub struct GossipLoadData {
     pub broadcast_texts: Vec<BroadcastTextRow>,
     pub npc_gossip: Vec<NpcGossipRow>,
     pub points_of_interest: Vec<PointOfInterestRow>,
+    pub quest_greetings: Vec<QuestGreetingRow>,
 }
 
 /// Repository for gossip-related database operations
@@ -145,6 +156,7 @@ impl GossipRepository {
         let broadcast_texts = self.load_broadcast_texts().await?;
         let npc_gossip = self.load_npc_gossip().await?;
         let points_of_interest = self.load_points_of_interest().await?;
+        let quest_greetings = self.load_quest_greetings().await?;
 
         Ok(GossipLoadData {
             menus,
@@ -153,6 +165,7 @@ impl GossipRepository {
             broadcast_texts,
             npc_gossip,
             points_of_interest,
+            quest_greetings,
         })
     }
 
@@ -218,5 +231,16 @@ impl GossipRepository {
         .fetch_all(&*self.pool)
         .await
         .context("Failed to load points of interest")
+    }
+
+    /// Load the greetings shown above quest givers' lists
+    async fn load_quest_greetings(&self) -> Result<Vec<QuestGreetingRow>> {
+        sqlx::query_as::<_, QuestGreetingRow>(
+            "SELECT entry, type, content_default, emote_id::BIGINT AS emote_id, \
+              emote_delay::BIGINT AS emote_delay FROM world.quest_greeting",
+        )
+        .fetch_all(&*self.pool)
+        .await
+        .context("Failed to load quest greetings")
     }
 }

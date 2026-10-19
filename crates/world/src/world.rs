@@ -565,6 +565,9 @@ impl World {
         // Initialize game systems
         step("Initializing systems");
         self.systems.init_all().await?;
+        self.systems
+            .gossip_manager
+            .drop_missing_conditions(&self.managers.condition_mgr);
 
         // Load graveyard data (needs both DBC and world DB)
         {

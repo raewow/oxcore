@@ -7,11 +7,14 @@ use anyhow::Result;
 use dashmap::DashMap;
 use sqlx::PgPool;
 use std::sync::Arc;
-use tracing::info;
+use tracing::{info, warn};
 
 use super::types::{
-    BroadcastText, GossipMenu, GossipMenuItem, NpcText, NpcTextOption, PointOfInterest,
+    gossip_option, BroadcastText, GossipMenu, GossipMenuItem, NpcText, NpcTextOption,
+    PointOfInterest, QuestGreeting, GOSSIP_ICON_MAX,
 };
+use crate::game::conditions::ConditionManager;
+use crate::game::db_scripts::{self, ScriptTable};
 use oxcore_db::database::world::repositories::GossipRepository;
 
 /// Manages gossip menu data (state storage + database loading)
@@ -30,6 +33,8 @@ pub struct GossipManager {
     npc_gossip_texts: DashMap<u32, u32>,
     /// Map markers by entry
     points_of_interest: DashMap<u32, PointOfInterest>,
+    /// Quest-list greetings by (entry, 0 creature / 1 game object)
+    quest_greetings: DashMap<(u32, u8), QuestGreeting>,
 }
 
 impl GossipManager {
@@ -43,6 +48,7 @@ impl GossipManager {
             broadcast_texts: DashMap::new(),
             npc_gossip_texts: DashMap::new(),
             points_of_interest: DashMap::new(),
+            quest_greetings: DashMap::new(),
         }
     }
 
@@ -50,37 +56,6 @@ impl GossipManager {
     pub async fn load(&self) -> Result<()> {
         let repo = GossipRepository::new(Arc::clone(&self.world_db));
         let data = repo.load_all().await?;
-
-        // Load menus
-        for row in &data.menus {
-            self.add_menu(GossipMenu {
-                entry: row.entry.try_into()?,
-                text_id: row.text_id.try_into()?,
-                script_id: row.script_id.try_into()?,
-                condition_id: row.condition_id.try_into()?,
-            });
-        }
-
-        // Load menu items
-        for row in &data.options {
-            self.add_menu_item(GossipMenuItem {
-                menu_id: row.menu_id.try_into()?,
-                id: row.id.try_into()?,
-                option_icon: row.option_icon.try_into()?,
-                option_text: row.option_text.clone().unwrap_or_default(),
-                option_broadcast_text: row.option_broadcast_text.try_into()?,
-                option_id: row.option_id.try_into()?,
-                npc_option_npcflag: row.npc_option_npcflag.try_into()?,
-                action_menu_id: row.action_menu_id,
-                action_poi_id: row.action_poi_id.try_into()?,
-                action_script_id: row.action_script_id.try_into()?,
-                box_coded: row.box_coded,
-                box_money: row.box_money.try_into()?,
-                box_text: row.box_text.clone().unwrap_or_default(),
-                box_broadcast_text: row.box_broadcast_text.try_into()?,
-                condition_id: row.condition_id.try_into()?,
-            });
-        }
 
         // Load NPC texts
         for row in &data.npc_texts {
@@ -142,9 +117,6 @@ impl GossipManager {
             });
         }
 
-        for row in &data.npc_gossip {
-            self.set_npc_gossip_text(row.npc_guid.try_into()?, row.textid.try_into()?);
-        }
 
         for row in &data.points_of_interest {
             self.add_point_of_interest(PointOfInterest {
@@ -156,6 +128,61 @@ impl GossipManager {
                 data: row.data.try_into()?,
                 icon_name: row.icon_name.clone(),
             });
+        }
+
+        // Menus and options last: they are checked against the texts and markers above.
+        for row in &data.menus {
+            let menu = GossipMenu {
+                entry: row.entry.try_into()?,
+                text_id: row.text_id.try_into()?,
+                script_id: row.script_id.try_into()?,
+                condition_id: row.condition_id.try_into()?,
+            };
+            if let Some(menu) = self.checked_menu(menu) {
+                self.add_menu(menu);
+            }
+        }
+        for row in &data.options {
+            let item = GossipMenuItem {
+                menu_id: row.menu_id.try_into()?,
+                id: row.id.try_into()?,
+                option_icon: row.option_icon.try_into()?,
+                option_text: row.option_text.clone().unwrap_or_default(),
+                option_broadcast_text: row.option_broadcast_text.try_into()?,
+                option_id: row.option_id.try_into()?,
+                npc_option_npcflag: row.npc_option_npcflag.try_into()?,
+                action_menu_id: row.action_menu_id,
+                action_poi_id: row.action_poi_id.try_into()?,
+                action_script_id: row.action_script_id.try_into()?,
+                box_coded: row.box_coded,
+                box_money: row.box_money.try_into()?,
+                box_text: row.box_text.clone().unwrap_or_default(),
+                box_broadcast_text: row.box_broadcast_text.try_into()?,
+                condition_id: row.condition_id.try_into()?,
+            };
+            if let Some(item) = self.checked_menu_item(item) {
+                self.add_menu_item(item);
+            }
+        }
+
+        for row in &data.npc_gossip {
+            let (spawn_id, text_id) = (row.npc_guid.try_into()?, row.textid.try_into()?);
+            if self.npc_texts.contains_key(&text_id) {
+                self.set_npc_gossip_text(spawn_id, text_id);
+            } else {
+                warn!("npc_gossip for spawn {} uses missing text {}", spawn_id, text_id);
+            }
+        }
+
+        for row in &data.quest_greetings {
+            self.quest_greetings.insert(
+                (row.entry.try_into()?, row.r#type.try_into()?),
+                QuestGreeting {
+                    text: row.content_default.clone(),
+                    emote: row.emote_id.try_into()?,
+                    emote_delay: row.emote_delay.try_into()?,
+                },
+            );
         }
 
         info!(
@@ -241,5 +268,129 @@ impl GossipManager {
     /// Add a map marker
     pub fn add_point_of_interest(&self, poi: PointOfInterest) {
         self.points_of_interest.insert(poi.entry, poi);
+    }
+
+    /// The greeting a creature (`kind` 0) or game object (1) puts above its quest list.
+    pub fn quest_greeting(&self, entry: u32, kind: u8) -> Option<QuestGreeting> {
+        self.quest_greetings.get(&(entry, kind)).map(|g| g.clone())
+    }
+
+    /// Add a quest-list greeting
+    pub fn add_quest_greeting(&self, entry: u32, kind: u8, greeting: QuestGreeting) {
+        self.quest_greetings.insert((entry, kind), greeting);
+    }
+
+    /// A menu row as it may be used: rows whose text is missing, or whose script does
+    /// not exist, are dropped.
+    pub fn checked_menu(&self, menu: GossipMenu) -> Option<GossipMenu> {
+        if !self.npc_texts.contains_key(&menu.text_id) {
+            warn!(
+                "gossip_menu {} uses missing text {}",
+                menu.entry, menu.text_id
+            );
+            return None;
+        }
+        if menu.script_id != 0 && db_scripts::script(ScriptTable::Gossip, menu.script_id).is_none() {
+            warn!(
+                "gossip_menu {} text {} has missing script {}",
+                menu.entry, menu.text_id, menu.script_id
+            );
+            return None;
+        }
+        Some(menu)
+    }
+
+    /// An option as it may be used. Options of missing menus or with missing scripts are
+    /// dropped; unknown icons become the chat bubble, and missing broadcast texts and map
+    /// markers are cleared.
+    pub fn checked_menu_item(&self, mut item: GossipMenuItem) -> Option<GossipMenuItem> {
+        let (menu, id) = (item.menu_id, item.id);
+        if menu != 0 && !self.menus.contains_key(&menu) {
+            warn!("gossip_menu_option {}/{} belongs to a missing menu", menu, id);
+            return None;
+        }
+        if item.action_script_id != 0
+            && db_scripts::script(ScriptTable::Gossip, item.action_script_id).is_none()
+        {
+            warn!(
+                "gossip_menu_option {}/{} has missing script {}",
+                menu, id, item.action_script_id
+            );
+            return None;
+        }
+        if item.option_id == gossip_option::GOSSIP
+            && item.action_menu_id > 0
+            && !self.menus.contains_key(&(item.action_menu_id as u32))
+        {
+            warn!(
+                "gossip_menu_option {}/{} leads to missing menu {}",
+                menu, id, item.action_menu_id
+            );
+        }
+        if item.option_id == gossip_option::NONE || item.option_id > gossip_option::UNLEARNPETSKILLS {
+            warn!(
+                "gossip_menu_option {}/{} has option type {} and will never show",
+                menu, id, item.option_id
+            );
+        }
+        if item.option_icon >= GOSSIP_ICON_MAX {
+            warn!(
+                "gossip_menu_option {}/{} has unknown icon {}",
+                menu, id, item.option_icon
+            );
+            item.option_icon = 0;
+        }
+        if item.option_broadcast_text != 0
+            && !self.broadcast_texts.contains_key(&item.option_broadcast_text)
+        {
+            warn!(
+                "gossip_menu_option {}/{} uses missing broadcast text {}",
+                menu, id, item.option_broadcast_text
+            );
+            item.option_broadcast_text = 0;
+        }
+        if item.box_broadcast_text != 0
+            && !self.broadcast_texts.contains_key(&item.box_broadcast_text)
+        {
+            warn!(
+                "gossip_menu_option {}/{} uses missing box broadcast text {}",
+                menu, id, item.box_broadcast_text
+            );
+            item.box_broadcast_text = 0;
+        }
+        if item.action_poi_id != 0 && !self.points_of_interest.contains_key(&item.action_poi_id) {
+            warn!(
+                "gossip_menu_option {}/{} points to missing point of interest {}",
+                menu, id, item.action_poi_id
+            );
+            item.action_poi_id = 0;
+        }
+        Some(item)
+    }
+
+    /// Clears conditions that do not exist, so the menus and options using them always show.
+    pub fn drop_missing_conditions(&self, conditions: &ConditionManager) {
+        for mut menus in self.menus.iter_mut() {
+            for menu in menus.iter_mut() {
+                if menu.condition_id != 0 && !conditions.contains(menu.condition_id) {
+                    warn!(
+                        "gossip_menu {} text {} uses missing condition {}",
+                        menu.entry, menu.text_id, menu.condition_id
+                    );
+                    Arc::make_mut(menu).condition_id = 0;
+                }
+            }
+        }
+        for mut items in self.menu_items.iter_mut() {
+            for item in items.iter_mut() {
+                if item.condition_id != 0 && !conditions.contains(item.condition_id) {
+                    warn!(
+                        "gossip_menu_option {}/{} uses missing condition {}",
+                        item.menu_id, item.id, item.condition_id
+                    );
+                    item.condition_id = 0;
+                }
+            }
+        }
     }
 }

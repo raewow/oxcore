@@ -482,7 +482,8 @@ pub async fn handle_npc_text_query(
                 .gossip_manager
                 .get_broadcast_text(opt.broadcast_text_id);
             NpcTextOption {
-                probability: opt.probability,
+                // A line without text is never picked.
+                probability: if bct.is_some() { opt.probability } else { 0.0 },
                 broadcast_text_id: opt.broadcast_text_id,
                 male_text: bct
                     .as_ref()

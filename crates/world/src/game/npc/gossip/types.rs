@@ -26,7 +26,7 @@ pub struct GossipMenuItem {
     pub menu_id: u32,
     /// Option ID within the menu
     pub id: u32,
-    /// Icon ID (0-15, see GossipIcon enum)
+    /// Icon ID (below `GOSSIP_ICON_MAX`)
     pub option_icon: u8,
     /// Display text
     pub option_text: String,
@@ -149,48 +149,15 @@ pub struct PointOfInterest {
     pub icon_name: String,
 }
 
-/// Gossip option icon types
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub enum GossipIcon {
-    /// Default chat bubble
-    Chat = 0,
-    /// Vendor/bag icon
-    Vendor = 1,
-    /// Flight master/taxi
-    Taxi = 2,
-    /// Trainer
-    Trainer = 3,
-    /// Spirit healer
-    SpiritHealer = 4,
-    /// Innkeeper/binder
-    Binder = 5,
-    /// Banker
-    Banker = 6,
-    /// Petition
-    Petition = 7,
-    /// Tabard designer
-    Tabard = 8,
-    /// Battlemaster
-    Battlemaster = 9,
-    /// Auctioneer
-    Auctioneer = 10,
-    /// Talent master
-    TalentMaster = 11,
-    /// Stable master
-    Stablemaster = 12,
-    /// Guild banker
-    Guild = 13,
-    /// Unlearn talents
-    UnlearnTalents = 14,
-    /// Arena
-    Arena = 15,
-}
+/// Option icons 0..=20 all exist in the 1.12 client.
+pub const GOSSIP_ICON_MAX: u8 = 21;
 
-impl Default for GossipIcon {
-    fn default() -> Self {
-        GossipIcon::Chat
-    }
+/// Greeting above a quest giver's list (`quest_greeting`).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct QuestGreeting {
+    pub text: String,
+    pub emote: u32,
+    pub emote_delay: u32,
 }
 
 /// Gossip option type constants

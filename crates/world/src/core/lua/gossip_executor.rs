@@ -9,7 +9,9 @@ use tracing::debug;
 
 use super::actions::LuaAction;
 use super::snapshot::PlayerSnapshot;
-use crate::game::npc::gossip::{gossip_option, PlayerGossipMenu, PreparedGossipOption};
+use crate::game::npc::gossip::{
+    gossip_option, PlayerGossipMenu, PreparedGossipOption, GOSSIP_MAX_MENU_ITEMS,
+};
 use crate::World;
 use oxcore_shared::messages::gossip::{
     GossipOptionData, GossipQuestData, SmsgGossipComplete, SmsgGossipMessage,
@@ -91,6 +93,14 @@ pub async fn execute_gossip_actions(
                 box_text,
                 box_money,
             } => {
+                if gossip_options.len() == GOSSIP_MAX_MENU_ITEMS {
+                    tracing::warn!(
+                        "Gossip script menu for {:?} has more than {} options",
+                        npc_guid,
+                        GOSSIP_MAX_MENU_ITEMS
+                    );
+                    continue;
+                }
                 gossip_options.push(PreparedGossipOption {
                     icon,
                     text,

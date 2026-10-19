@@ -22,7 +22,7 @@ use crate::protocol::{Opcode, WorldPacket};
 pub struct GossipOptionData {
     /// Option index (0-based)
     pub index: u32,
-    /// Icon ID (0-15, see GossipIcon enum)
+    /// Icon ID (0-20)
     pub icon: u8,
     /// Whether option requires text input (coded)
     pub coded: bool,

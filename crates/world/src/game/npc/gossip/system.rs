@@ -11,7 +11,7 @@ use tracing::{debug, warn};
 use super::manager::GossipManager;
 use super::types::{
     gossip_option, GossipMenuItem, PlayerGossipMenu, PreparedGossipOption,
-    DEFAULT_GOSSIP_MESSAGE,
+    DEFAULT_GOSSIP_MESSAGE, GOSSIP_MAX_MENU_ITEMS,
 };
 use crate::game::broadcast_mgr::{BroadcastManager, BroadcastManagerExt};
 use crate::game::conditions::ConditionContext;
@@ -227,6 +227,13 @@ impl GossipSystem {
             if !shown {
                 continue;
             }
+            if options.len() == GOSSIP_MAX_MENU_ITEMS {
+                warn!(
+                    "Gossip menu {} has more than {} options to show; the rest are dropped",
+                    menu_id, GOSSIP_MAX_MENU_ITEMS
+                );
+                break;
+            }
 
             let mut text = self.text_or_broadcast(&item.option_text, item.option_broadcast_text, viewer.gender);
             if shown_to_gm_only {
@@ -346,7 +353,16 @@ impl GossipSystem {
                 .await;
         }
 
-        let greeting = self.quest_list_greeting(world, player_guid, source_guid);
+        let kind = u8::from(source_guid.is_game_object());
+        let greeting = self
+            .manager
+            .quest_greeting(source_guid.entry(), kind)
+            .map(|g| QuestListGreeting {
+                text: g.text,
+                emote_delay: g.emote_delay,
+                emote: g.emote,
+            })
+            .unwrap_or_else(|| self.quest_list_greeting(world, player_guid, source_guid));
         quest_system.send_quest_list(player_guid, source_guid, &quests, &greeting);
         Ok(())
     }
