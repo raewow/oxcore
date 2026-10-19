@@ -283,6 +283,9 @@ impl MovementSystem {
             new_pos,
         );
 
+        // Discovering the area underfoot.
+        crate::game::player::exploration::check_area_explore(world, player_guid, map_id, new_pos);
+
         // 7.2. Remember solid ground, and catch a fall through the world.
         check_fall_through_world(player_guid, map_id, new_pos, movement_info.flags, world).await?;
 
@@ -386,6 +389,9 @@ impl MovementSystem {
             map_id,
             new_pos,
         );
+
+        // Discovering the area underfoot.
+        crate::game::player::exploration::check_area_explore(world, player_guid, map_id, new_pos);
 
         self.broadcast_movement(player_guid, opcode, movement_info, world)?;
 

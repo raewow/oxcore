@@ -454,6 +454,10 @@ impl World {
             }
         }
 
+        match crate::game::player::exploration::load_base_xp(&self.databases.world).await {
+            Ok(count) => tracing::info!("Loaded {} exploration experience levels", count),
+            Err(e) => tracing::error!("Failed to load exploration experience: {e:#}"),
+        }
         match crate::game::db_scripts::load(&self.databases.world).await {
             Ok(count) => tracing::info!("Loaded {} database script steps", count),
             Err(e) => tracing::error!("Failed to load database scripts: {}", e),

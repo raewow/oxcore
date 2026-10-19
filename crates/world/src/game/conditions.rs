@@ -273,6 +273,22 @@ impl ConditionManager {
             }
             31 => object_field_flags(context.source, entry.values[0] as u32, world)
                 .is_some_and(|value| value & entry.values[1] as u32 != 0),
+            59 => {
+                let flag = world
+                    .dbc
+                    .read()
+                    .get_area(entry.values[0] as u32)
+                    .map(|area| area.explore_flag);
+                flag.is_some_and(|flag| {
+                    world
+                        .managers
+                        .player_mgr
+                        .with_player(context.target, |p| {
+                            crate::game::player::exploration::is_explored(&p.explored_zones, flag)
+                        })
+                        .unwrap_or(false)
+                })
+            }
             33 => object_map(context.source, world)
                 .or_else(|| object_map(context.target, world))
                 .is_some_and(|(map, _)| map == entry.values[0] as u32),

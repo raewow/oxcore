@@ -316,6 +316,8 @@ pub struct Config {
     // Quest System Settings
     #[serde(default = "default_quest_low_level_hide_diff")]
     pub quest_low_level_hide_diff: u32, // Hide quest giver icons for quests below this level diff (0=disabled)
+    #[serde(default = "default_rate_xp_explore")]
+    pub rate_xp_explore: f32, // Rate multiplier for area discovery experience (default: 1.0)
     #[serde(default = "default_rate_drop_money")]
     pub rate_drop_money: f32, // Rate multiplier for quest money rewards (default: 1.0)
     #[serde(default = "default_no_quest_xp_to_gold")]
@@ -699,6 +701,10 @@ fn default_rate_drop_money() -> f32 {
     1.0
 }
 
+fn default_rate_xp_explore() -> f32 {
+    1.0
+}
+
 fn default_no_quest_xp_to_gold() -> bool {
     false
 }
@@ -854,6 +860,7 @@ impl Default for Config {
             no_respec_price_decay: None,
             quest_low_level_hide_diff: default_quest_low_level_hide_diff(),
             rate_drop_money: default_rate_drop_money(),
+            rate_xp_explore: default_rate_xp_explore(),
             no_quest_xp_to_gold: default_no_quest_xp_to_gold(),
             rate_talent: default_rate_talent(),
             default_shutdown_timer: default_shutdown_timer(),

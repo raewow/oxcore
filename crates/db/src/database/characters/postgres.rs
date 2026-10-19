@@ -543,6 +543,17 @@ impl PgCharacterRepository {
             .bind(map).bind(instance).bind(zone).bind(x).bind(y).bind(z).bind(o).bind(guid).execute(&*self.pool).await.context("Failed to update PostgreSQL character position").map(|_| ())
     }
 
+    /// Store the discovered-area bits (`explored_zones`, space-separated words).
+    pub async fn save_explored_zones(&self, guid: i64, explored_zones: &str) -> Result<()> {
+        sqlx::query("UPDATE characters.characters SET explored_zones=$1 WHERE guid=$2")
+            .bind(explored_zones)
+            .bind(guid)
+            .execute(&*self.pool)
+            .await
+            .context("Failed to save PostgreSQL explored zones")
+            .map(|_| ())
+    }
+
     /// Store the known taxi nodes and the hop in progress (empty when not flying).
     pub async fn save_taxi(&self, guid: i64, known_mask: &str, journey: &str) -> Result<()> {
         sqlx::query("UPDATE characters.characters SET known_taxi_mask=$1, current_taxi_path=$2 WHERE guid=$3")

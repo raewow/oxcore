@@ -68,6 +68,13 @@ field logic is Lua (`scripts/battlegrounds/`).
   arenas such as Gurubashi) are not modelled.
 - **Duels** are not supported.
 
+## Exploration
+
+- **Areas come from terrain only.** Discovery reads the area flag of the
+  terrain under the player, so areas defined by buildings (WMO areas) are
+  discovered as the zone around them, and the outdoor-only aura checks that
+  run alongside discovery are not done.
+
 ## Vendors
 
 - **Reputation discount is a stub.** `calculate_reputation_discount` in
@@ -83,9 +90,9 @@ field logic is Lua (`scripts/battlegrounds/`).
   guild at its lowest rank the way GM-added members do, without the other
   side of the guild system (member levels, classes and online fields) being
   filled in.
-- **Some gossip conditions are rejected.** Saved variables (11), scripted map
-  events (36) and explored areas (59) are not evaluated, so the few menus and
-  options using them stay hidden. Instance script checks (18) are answered by
+- **Some gossip conditions are rejected.** Saved variables (11) and scripted
+  map events (36) are not evaluated, so the few menus and options using them
+  stay hidden. Instance script checks (18) are answered by
   Temple of Ahn'Qiraj only; Blackwing Lair's scepter run and Zul'Gurub's
   Thekal checks are not scripted.
 - **English only.** The world server has no client locale, so localised

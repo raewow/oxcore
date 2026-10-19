@@ -160,6 +160,8 @@ pub struct Player {
     pub environment: EnvironmentState,
     /// Target currently being looted
     pub looting_target: Option<ObjectGuid>,
+    /// Areas the player has discovered, one bit per AreaTable explore flag.
+    pub explored_zones: crate::game::player::exploration::ExploredZones,
     /// The gossip menu the player was last shown.
     pub gossip: crate::game::npc::gossip::PlayerGossipMenu,
     /// Banker currently authorized for open bank operations.
@@ -298,6 +300,7 @@ impl Player {
             ammo_id: 0,
             environment: EnvironmentState::default(),
             looting_target: None,
+            explored_zones: [0; crate::game::player::exploration::EXPLORED_ZONE_FIELDS],
             gossip: Default::default(),
             current_banker_guid: None,
             selection: None,

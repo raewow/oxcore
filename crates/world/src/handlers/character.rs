@@ -328,6 +328,8 @@ pub async fn handle_player_login_with_guid(
     player.player_flags = u32::try_from(character.character_flags)?;
     player.xp = u32::try_from(character.xp)?;
     player.ammo_id = u32::try_from(character.ammo_id)?;
+    player.explored_zones =
+        crate::game::player::exploration::parse_saved(character.explored_zones.as_deref());
     crate::game::taxi::flight::load_for_login(
         world,
         &mut player.taxi,
@@ -1652,6 +1654,17 @@ pub fn build_player_create_block_for_player(
         .set_field(PLAYER_FIELD_COINAGE, money)
         // PLAYER_FIELD_WATCHED_FACTION_INDEX: -1 = no faction being tracked
         .set_field(PLAYER_FIELD_WATCHED_FACTION_INDEX, 0xFFFFFFFF_u32);
+
+    // Discovered areas, for the world map.
+    let mut create_block = create_block;
+    for (slot, word) in player.explored_zones.iter().enumerate() {
+        if *word != 0 {
+            create_block = create_block.set_field(
+                oxcore_shared::protocol::update_fields::PLAYER_EXPLORED_ZONES_1 + slot as u32,
+                *word,
+            );
+        }
+    }
 
     // Add all skills from player's skill state to UPDATE_OBJECT
     // Each skill takes 3 consecutive u32 fields:

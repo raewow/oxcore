@@ -7,6 +7,7 @@ pub mod broadcaster;
 pub mod death;
 pub mod environment;
 pub mod experience;
+pub mod exploration;
 pub mod honor;
 pub mod manager;
 pub mod movement;

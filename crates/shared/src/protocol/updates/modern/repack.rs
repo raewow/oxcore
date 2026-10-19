@@ -22,7 +22,7 @@ use super::field_map::{
 };
 use super::fields::ModernObjectType;
 use crate::protocol::update_fields::{
-    GAMEOBJECT_DYN_FLAGS, PLAYER_BYTES_3, PLAYER_FIELD_BUYBACK_PRICE_1,
+    GAMEOBJECT_DYN_FLAGS, PLAYER_BYTES_3, PLAYER_EXPLORED_ZONES_1, PLAYER_FIELD_BUYBACK_PRICE_1,
     PLAYER_FIELD_BUYBACK_TIMESTAMP_1, PLAYER_FIELD_BYTES, PLAYER_FIELD_BYTES2,
     PLAYER_FIELD_LAST_WEEK_KILLS, PLAYER_FIELD_SESSION_KILLS, PLAYER_FIELD_THIS_WEEK_KILLS,
     PLAYER_FIELD_YESTERDAY_KILLS,
@@ -230,6 +230,15 @@ pub fn repack(object_type: ModernObjectType, vanilla_index: u32, value: u32) -> 
         if let Some(offset) = buyback_slot(vanilla_index, PLAYER_FIELD_BUYBACK_TIMESTAMP_1) {
             return Some(Writes::new(&[(
                 MODERN_ACTIVE_PLAYER_FIELD_BUYBACK_TIMESTAMP + offset,
+                value,
+            )]));
+        }
+
+        // Discovered areas: 1.14 keeps them as 64-bit words, each the little-endian pair of two
+        // vanilla words, so the bits line up and only the array's start moves.
+        if let Some(offset) = explored_zone_slot(vanilla_index) {
+            return Some(Writes::new(&[(
+                MODERN_ACTIVE_PLAYER_FIELD_EXPLORED_ZONES + offset,
                 value,
             )]));
         }
@@ -495,6 +504,17 @@ pub fn repack(object_type: ModernObjectType, vanilla_index: u32, value: u32) -> 
     })
 }
 
+/// 1.14 `ACTIVE_PLAYER_FIELD_EXPLORED_ZONES` (`PLAYER_END + 0x5C2`, 480 slots), the same in
+/// the 40688 and 41750 tables.
+const MODERN_ACTIVE_PLAYER_FIELD_EXPLORED_ZONES: u16 = 2234;
+
+/// Split a vanilla explored-area index into its word offset, or `None` if it is not one.
+fn explored_zone_slot(vanilla_index: u32) -> Option<u16> {
+    const VANILLA_EXPLORED_WORDS: u32 = 64;
+    let relative = vanilla_index.checked_sub(PLAYER_EXPLORED_ZONES_1)?;
+    (relative < VANILLA_EXPLORED_WORDS).then_some(relative as u16)
+}
+
 /// Split a vanilla buyback field index into its slot offset, or `None` if it is not one.
 ///
 /// Twelve slots in both protocols; a stray index past the end must fall through to the ordinary
@@ -539,6 +559,17 @@ fn quest_log_slot(vanilla_index: u32) -> Option<(u16, u32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explored_zones_move_to_the_modern_array() {
+        let writes = repack(ModernObjectType::ActivePlayer, PLAYER_EXPLORED_ZONES_1 + 3, 0x10)
+            .expect("transformed");
+        assert_eq!(
+            writes.as_slice(),
+            [(MODERN_ACTIVE_PLAYER_FIELD_EXPLORED_ZONES + 3, 0x10)]
+        );
+        assert!(explored_zone_slot(PLAYER_EXPLORED_ZONES_1 + 64).is_none());
+    }
 
     /// The class byte is duplicated into PlayerClassId and the power type is evicted to its own
     /// field. Passing the word through unchanged would set the player's sex to their power type.
