@@ -154,6 +154,20 @@ impl TalentSystem {
     ///
     /// # Returns
     /// Ok(true) if reset succeeded, Ok(false) if failed (no talents or no gold)
+    /// What resetting the player's talents at a trainer costs now, in copper.
+    pub fn reset_cost(&self, player_guid: ObjectGuid, world: &World) -> u32 {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        world
+            .systems
+            .player
+            .manager()
+            .with_player(player_guid, |player| reset_cost_at(&player.talents, now))
+            .unwrap_or(0)
+    }
+
     pub async fn reset_talents(
         &self,
         player_guid: ObjectGuid,
@@ -184,19 +198,7 @@ impl TalentSystem {
         let cost = if no_cost {
             0
         } else {
-            let config = reset::ResetCostConfig::default(); // TODO: load from config
-            let decayed_multi = reset::decay_multiplier(
-                state_snapshot.reset_cost_multiplier,
-                state_snapshot.last_reset_time,
-                now,
-                config.min_multiplier,
-            );
-            reset::calculate_reset_cost(
-                decayed_multi,
-                config.base_cost,
-                config.multi_cost,
-                config.max_multiplier,
-            )
+            reset_cost_at(&state_snapshot, now)
         };
 
         // 4. Check gold (pure)
@@ -321,4 +323,21 @@ impl TalentSystem {
 
         Ok(())
     }
+}
+
+/// The cost of a paid reset at `now`, from the player's reset history.
+fn reset_cost_at(talents: &super::state::TalentState, now: u64) -> u32 {
+    let config = reset::ResetCostConfig::default(); // TODO: load from config
+    let decayed_multi = reset::decay_multiplier(
+        talents.reset_cost_multiplier,
+        talents.last_reset_time,
+        now,
+        config.min_multiplier,
+    );
+    reset::calculate_reset_cost(
+        decayed_multi,
+        config.base_cost,
+        config.multi_cost,
+        config.max_multiplier,
+    )
 }

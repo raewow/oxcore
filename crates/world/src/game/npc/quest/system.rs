@@ -2870,110 +2870,165 @@ impl QuestSystem {
                     continue;
                 }
 
-                // Found a matching objective — check and update count
-                let update_result = self
-                    .player_mgr
-                    .with_player_mut(player_guid, |p| {
-                        if let Some(progress) =
-                            p.active_quests.iter_mut().find(|q| q.quest_id == quest_id)
-                        {
-                            let current = progress.creature_or_go_count[obj_idx];
-                            let required = quest.req_creature_or_go_count[obj_idx];
-
-                            if current < required {
-                                progress.creature_or_go_count[obj_idx] += 1;
-                                progress.mark_changed();
-                                let new_count = progress.creature_or_go_count[obj_idx];
-
-                                let is_complete = progress.is_complete(&quest);
-                                if is_complete {
-                                    progress.status = QuestStatus::Complete;
-                                }
-
-                                // Collect all counts for quest log field update
-                                let all_counts = progress.creature_or_go_count;
-
-                                // Find quest slot index
-                                let slot =
-                                    p.active_quests.iter().position(|q| q.quest_id == quest_id);
-
-                                Some((new_count, required, all_counts, is_complete, slot))
-                            } else {
-                                None // Already at max
-                            }
-                        } else {
-                            None
-                        }
-                    })
-                    .flatten();
-
-                let Some((new_count, required_count, all_counts, is_complete, slot)) =
-                    update_result
-                else {
-                    break; // Quest not found or already at max
-                };
-
-                // Entry for packet: GameObjects use 0x80000000 flag
-                let entry_for_packet = if required_entry < 0 {
-                    ((-required_entry) as u32) | 0x80000000
-                } else {
-                    required_entry as u32
-                };
-
-                // Send SMSG_QUESTUPDATE_ADD_KILL
-                let kill_msg = SmsgQuestupdateAddKill {
-                    quest_id,
-                    entry: entry_for_packet,
-                    count: new_count,
-                    required_count,
-                    guid: creature_guid,
-                };
-                self.broadcast_mgr.send_msg_to_player(player_guid, kill_msg);
-
-                info!(
-                    "[QUEST] Kill credit: player {:?} quest {} objective {} — {}/{}",
-                    player_guid, quest_id, obj_idx, new_count, required_count
-                );
-
-                // Update quest log fields (6-bit packed counters)
-                if let Some(slot) = slot {
-                    const MAX_QUEST_OFFSET: u32 = 3;
-                    const QUEST_COUNT_STATE_OFFSET: u32 = 1;
-
-                    let count_state_field = PLAYER_QUEST_LOG_1_1
-                        + (slot as u32) * MAX_QUEST_OFFSET
-                        + QUEST_COUNT_STATE_OFFSET;
-
-                    // Pack all 4 objective counters into 6-bit fields
-                    let mut packed: u32 = 0;
-                    for i in 0..QUEST_OBJECTIVES_COUNT {
-                        let count = (all_counts[i] as u32).min(63);
-                        packed |= count << (i as u32 * 6);
-                    }
-
-                    let world_guid = ObjectGuid::from_low(player_guid.counter());
-                    let values_update = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(
-                        ValuesUpdateBlock::new(world_guid, ObjectType::Player)
-                            .set_field(count_state_field, packed),
-                    ));
-                    self.broadcast_mgr
-                        .send_msg_to_player(player_guid, values_update);
-                }
-
-                // If quest is now complete, notify client
-                if is_complete {
-                    let complete_msg = SmsgQuestupdateComplete { quest_id };
-                    self.broadcast_mgr
-                        .send_msg_to_player(player_guid, complete_msg);
-                    info!(
-                        "[QUEST] Quest {} is now complete for player {:?}",
-                        quest_id, player_guid
-                    );
-                }
-
+                self.add_objective_credit(player_guid, &quest, obj_idx, creature_guid);
                 break; // Only update first matching objective per quest
             }
         }
+    }
+
+    /// Talking to a creature counts for "speak to" objectives of the player's incomplete
+    /// quests that name it.
+    pub fn talked_to_creature(
+        &self,
+        player_guid: ObjectGuid,
+        creature_entry: u32,
+        creature_guid: ObjectGuid,
+    ) {
+        let incomplete: Vec<u32> = self
+            .player_mgr
+            .get_player(player_guid)
+            .map(|p| {
+                p.active_quests
+                    .iter()
+                    .filter(|q| q.status == QuestStatus::Incomplete)
+                    .map(|q| q.quest_id)
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        for quest_id in incomplete {
+            let Some(quest) = self.manager.get_quest_template(quest_id) else {
+                continue;
+            };
+            let flags = quest.special_flags;
+            if !flags.intersects(QuestSpecialFlags::KILL_OR_CAST | QuestSpecialFlags::SPEAKTO)
+                || flags.contains(QuestSpecialFlags::EXPLORATION_OR_EVENT)
+            {
+                continue;
+            }
+            for obj_idx in 0..QUEST_OBJECTIVES_COUNT {
+                if quest.req_spell[obj_idx] != 0
+                    || quest.req_creature_or_go_id[obj_idx] != creature_entry as i32
+                {
+                    continue;
+                }
+                self.add_objective_credit(player_guid, &quest, obj_idx, creature_guid);
+            }
+        }
+    }
+
+    /// Counts one creature or game object towards objective `obj_idx`, telling the client
+    /// and completing the quest when that was the last thing missing. Returns false when
+    /// the objective was already done or the quest is not in the log.
+    fn add_objective_credit(
+        &self,
+        player_guid: ObjectGuid,
+        quest: &QuestTemplate,
+        obj_idx: usize,
+        creature_guid: ObjectGuid,
+    ) -> bool {
+        let quest_id = quest.id;
+        let required_entry = quest.req_creature_or_go_id[obj_idx];
+        let update_result = self
+            .player_mgr
+            .with_player_mut(player_guid, |p| {
+                if let Some(progress) =
+                    p.active_quests.iter_mut().find(|q| q.quest_id == quest_id)
+                {
+                    let current = progress.creature_or_go_count[obj_idx];
+                    let required = quest.req_creature_or_go_count[obj_idx];
+
+                    if current < required {
+                        progress.creature_or_go_count[obj_idx] += 1;
+                        progress.mark_changed();
+                        let new_count = progress.creature_or_go_count[obj_idx];
+
+                        let is_complete = progress.is_complete(quest);
+                        if is_complete {
+                            progress.status = QuestStatus::Complete;
+                        }
+
+                        // Collect all counts for quest log field update
+                        let all_counts = progress.creature_or_go_count;
+
+                        // Find quest slot index
+                        let slot =
+                            p.active_quests.iter().position(|q| q.quest_id == quest_id);
+
+                        Some((new_count, required, all_counts, is_complete, slot))
+                    } else {
+                        None // Already at max
+                    }
+                } else {
+                    None
+                }
+            })
+            .flatten();
+
+        let Some((new_count, required_count, all_counts, is_complete, slot)) =
+            update_result
+        else {
+            return false;
+        };
+
+        // Entry for packet: GameObjects use 0x80000000 flag
+        let entry_for_packet = if required_entry < 0 {
+            ((-required_entry) as u32) | 0x80000000
+        } else {
+            required_entry as u32
+        };
+
+        // Send SMSG_QUESTUPDATE_ADD_KILL
+        let kill_msg = SmsgQuestupdateAddKill {
+            quest_id,
+            entry: entry_for_packet,
+            count: new_count,
+            required_count,
+            guid: creature_guid,
+        };
+        self.broadcast_mgr.send_msg_to_player(player_guid, kill_msg);
+
+        info!(
+            "[QUEST] Objective credit: player {:?} quest {} objective {} — {}/{}",
+            player_guid, quest_id, obj_idx, new_count, required_count
+        );
+
+        // Update quest log fields (6-bit packed counters)
+        if let Some(slot) = slot {
+            const MAX_QUEST_OFFSET: u32 = 3;
+            const QUEST_COUNT_STATE_OFFSET: u32 = 1;
+
+            let count_state_field = PLAYER_QUEST_LOG_1_1
+                + (slot as u32) * MAX_QUEST_OFFSET
+                + QUEST_COUNT_STATE_OFFSET;
+
+            // Pack all 4 objective counters into 6-bit fields
+            let mut packed: u32 = 0;
+            for i in 0..QUEST_OBJECTIVES_COUNT {
+                let count = (all_counts[i] as u32).min(63);
+                packed |= count << (i as u32 * 6);
+            }
+
+            let world_guid = ObjectGuid::from_low(player_guid.counter());
+            let values_update = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(
+                ValuesUpdateBlock::new(world_guid, ObjectType::Player)
+                    .set_field(count_state_field, packed),
+            ));
+            self.broadcast_mgr
+                .send_msg_to_player(player_guid, values_update);
+        }
+
+        // If quest is now complete, notify client
+        if is_complete {
+            let complete_msg = SmsgQuestupdateComplete { quest_id };
+            self.broadcast_mgr
+                .send_msg_to_player(player_guid, complete_msg);
+            info!(
+                "[QUEST] Quest {} is now complete for player {:?}",
+                quest_id, player_guid
+            );
+        }
+        true
     }
 
     /// Mark all objectives of a quest complete for a player (area trigger / event completion).

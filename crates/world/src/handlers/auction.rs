@@ -794,7 +794,7 @@ pub async fn handle_auction_place_bid(
 
 /// Handle the auction hello packet by validating the target auctioneer,
 /// clearing feign death if needed, and sending the open-auction response.
-fn send_auction_hello_response(
+pub(crate) fn send_auction_hello_response(
     session: &WorldSession,
     player_guid: oxcore_shared::protocol::ObjectGuid,
     auctioneer_guid: oxcore_shared::protocol::ObjectGuid,

@@ -13,6 +13,12 @@ use super::types::{ItemExtendedCost, VendorItem, VendorItemCount};
 use oxcore_db::database::world::repositories::VendorRepository;
 use oxcore_shared::protocol::ObjectGuid;
 
+/// Vendor items from `npc_vendor`.
+pub const VENDOR_MENU_NORMAL: u32 = 0x1;
+/// Vendor items from the creature's `npc_vendor_template`.
+pub const VENDOR_MENU_TEMPLATE: u32 = 0x2;
+pub const VENDOR_MENU_ALL: u32 = VENDOR_MENU_NORMAL | VENDOR_MENU_TEMPLATE;
+
 /// Manages vendor data (state storage + database loading)
 pub struct VendorManager {
     /// Database pool for loading
@@ -85,17 +91,25 @@ impl VendorManager {
 
     /// Get vendor items (combines direct items + template items)
     pub fn get_vendor_items(&self, entry: u32) -> Vec<VendorItem> {
+        self.get_vendor_menu_items(entry, VENDOR_MENU_ALL)
+    }
+
+    /// The vendor's own items (`VENDOR_MENU_NORMAL`), its template's items
+    /// (`VENDOR_MENU_TEMPLATE`), or both.
+    pub fn get_vendor_menu_items(&self, entry: u32, menu: u32) -> Vec<VendorItem> {
         let mut items = Vec::new();
 
-        // Add direct items from npc_vendor
-        if let Some(direct) = self.vendor_items.get(&entry) {
-            items.extend(direct.iter().cloned());
+        if menu & VENDOR_MENU_NORMAL != 0 {
+            if let Some(direct) = self.vendor_items.get(&entry) {
+                items.extend(direct.iter().cloned());
+            }
         }
 
-        // Add template items if vendor_template_id > 0
-        if let Some(template_id) = self.creature_vendor_templates.get(&entry) {
-            if let Some(template) = self.vendor_template_items.get(&*template_id) {
-                items.extend(template.iter().cloned());
+        if menu & VENDOR_MENU_TEMPLATE != 0 {
+            if let Some(template_id) = self.creature_vendor_templates.get(&entry) {
+                if let Some(template) = self.vendor_template_items.get(&*template_id) {
+                    items.extend(template.iter().cloned());
+                }
             }
         }
 
@@ -230,5 +244,43 @@ impl VendorManager {
     /// Check if a creature has a vendor template
     pub fn has_vendor_template(&self, creature_entry: u32) -> bool {
         self.creature_vendor_templates.contains_key(&creature_entry)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::postgres::PgPoolOptions;
+
+    fn item(item_entry: u32) -> VendorItem {
+        VendorItem {
+            item_entry,
+            max_count: 0,
+            incr_time: 0,
+            condition_id: 0,
+            itemflags: 0,
+        }
+    }
+
+    #[tokio::test]
+    async fn vendor_menus_split_own_and_template_goods() {
+        let pool = PgPoolOptions::new()
+            .connect_lazy("postgres://test:test@localhost/test")
+            .expect("lazy pool should be constructible");
+        let manager = VendorManager::new(Arc::new(pool));
+        manager.vendor_items.insert(5, vec![item(100)]);
+        manager.vendor_template_items.insert(9, vec![item(200)]);
+        manager.creature_vendor_templates.insert(5, 9);
+
+        let entries = |menu| -> Vec<u32> {
+            manager
+                .get_vendor_menu_items(5, menu)
+                .iter()
+                .map(|i| i.item_entry)
+                .collect()
+        };
+        assert_eq!(entries(VENDOR_MENU_NORMAL), vec![100]);
+        assert_eq!(entries(VENDOR_MENU_TEMPLATE), vec![200]);
+        assert_eq!(entries(VENDOR_MENU_ALL), vec![100, 200]);
     }
 }

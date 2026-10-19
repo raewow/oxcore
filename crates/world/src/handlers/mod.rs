@@ -654,6 +654,15 @@ pub async fn dispatch_packet(
                 Opcode::CMSG_BANKER_ACTIVATE => {
                     gossip_handler::handle_banker_activate(session, packet, world).await?;
                 }
+                Opcode::MSG_TALENT_WIPE_CONFIRM => {
+                    gossip_handler::handle_talent_wipe_confirm(session, packet, world).await?;
+                }
+                Opcode::CMSG_PETITION_SHOWLIST => {
+                    gossip_handler::handle_petition_showlist(session, packet, world).await?;
+                }
+                Opcode::MSG_TABARDVENDOR_ACTIVATE => {
+                    gossip_handler::handle_tabard_vendor_activate(session, packet, world).await?;
+                }
 
                 // Player handlers
                 Opcode::CMSG_SET_SELECTION => {

@@ -729,3 +729,25 @@ mod tests {
         // Verify it serializes without panicking
     }
 }
+
+/// MSG_TABARDVENDOR_ACTIVATE - opens the guild tabard designer at an NPC.
+#[derive(Debug, Clone)]
+pub struct MsgTabardVendorActivate {
+    pub designer_guid: ObjectGuid,
+}
+
+impl ToWorldPacket for MsgTabardVendorActivate {
+    fn to_vanilla(&self) -> WorldPacket {
+        let mut packet = WorldPacket::new(Opcode::MSG_TABARDVENDOR_ACTIVATE);
+        packet.write_u64(self.designer_guid.raw());
+        packet
+    }
+
+    /// `SMSG_PLAYER_TABARD_VENDOR_ACTIVATE` in 1.14: the same GUID, packed.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        let mut writer = BitWriter::new();
+        let (high, low) = self.designer_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+        Some(writer.finish(Opcode::SMSG_PLAYER_TABARD_VENDOR_ACTIVATE))
+    }
+}

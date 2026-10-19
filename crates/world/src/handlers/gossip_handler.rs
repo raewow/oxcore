@@ -288,6 +288,126 @@ pub async fn handle_gossip_select_option(
         .await
 }
 
+/// Talking to a trainer, petitioner or tabard designer ends feign death.
+fn remove_feign_death(world: &World, player_guid: ObjectGuid) {
+    use crate::game::player::auras::effects::AURA_FEIGN_DEATH;
+    world.managers.player_mgr.with_player_mut(player_guid, |player| {
+        if !player
+            .auras
+            .container
+            .remove_spell_auras(AURA_FEIGN_DEATH)
+            .is_empty()
+        {
+            player.auras.needs_client_update = true;
+            player.auras.needs_stat_recalc = true;
+        }
+    });
+}
+
+/// Handle MSG_TALENT_WIPE_CONFIRM (1.14: CMSG_CONFIRM_RESPEC_WIPE)
+///
+/// The player accepted a class trainer's offer to reset their talents.
+/// Packet format: trainer GUID
+pub async fn handle_talent_wipe_confirm(
+    session: &WorldSession,
+    packet: &mut WorldPacket,
+    world: &World,
+) -> Result<()> {
+    const NPC_FLAG_TRAINER: u32 = 0x0000_0010;
+    const UNTALENT_VISUAL_SPELL: u32 = 14867;
+
+    let player_guid = session
+        .player_guid()
+        .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
+    let trainer_guid = packet
+        .read_guid_for(session.protocol())
+        .ok_or_else(|| anyhow::anyhow!("Failed to read trainer GUID"))?;
+
+    if !can_interact_with_npc(world, player_guid, trainer_guid, NPC_FLAG_TRAINER) {
+        debug!(
+            "Talent wipe: player {:?} cannot interact with trainer {:?}",
+            player_guid, trainer_guid
+        );
+        return Ok(());
+    }
+    remove_feign_death(world, player_guid);
+
+    let cost = world.systems.talents.reset_cost(player_guid, world);
+    if !world
+        .systems
+        .talents
+        .reset_talents(player_guid, false, world)
+        .await?
+    {
+        // An empty trainer tells the player there is nothing to reset.
+        session.send_msg(oxcore_shared::messages::MsgTalentWipeConfirm {
+            trainer_guid: ObjectGuid::empty(),
+            cost,
+        })?;
+        return Ok(());
+    }
+
+    crate::game::creature::ai::executor::try_to_cast(
+        world,
+        trainer_guid,
+        Some(player_guid),
+        UNTALENT_VISUAL_SPELL,
+        crate::game::creature::ai::executor::cast_flags::CF_TRIGGERED,
+        100,
+    );
+    Ok(())
+}
+
+/// Handle CMSG_PETITION_SHOWLIST (0x1BB)
+///
+/// Sent when the player talks to a guild master without a gossip menu.
+pub async fn handle_petition_showlist(
+    session: &WorldSession,
+    packet: &mut WorldPacket,
+    world: &World,
+) -> Result<()> {
+    const NPC_FLAG_PETITIONER: u32 = 0x0000_0200;
+
+    let player_guid = session
+        .player_guid()
+        .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
+    let npc_guid = packet
+        .read_guid_for(session.protocol())
+        .ok_or_else(|| anyhow::anyhow!("Failed to read petitioner GUID"))?;
+
+    if !can_interact_with_npc(world, player_guid, npc_guid, NPC_FLAG_PETITIONER) {
+        return Ok(());
+    }
+    remove_feign_death(world, player_guid);
+    session.send_msg(oxcore_shared::messages::SmsgPetitionShowlist { npc_guid })?;
+    Ok(())
+}
+
+/// Handle MSG_TABARDVENDOR_ACTIVATE (1.14: CMSG_TABARD_VENDOR_ACTIVATE)
+///
+/// Sent when the player talks to a tabard designer without a gossip menu.
+pub async fn handle_tabard_vendor_activate(
+    session: &WorldSession,
+    packet: &mut WorldPacket,
+    world: &World,
+) -> Result<()> {
+    const NPC_FLAG_TABARDDESIGNER: u32 = 0x0000_0400;
+
+    let player_guid = session
+        .player_guid()
+        .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
+    let designer_guid = packet
+        .read_guid_for(session.protocol())
+        .ok_or_else(|| anyhow::anyhow!("Failed to read tabard designer GUID"))?;
+
+    if !can_interact_with_npc(world, player_guid, designer_guid, NPC_FLAG_TABARDDESIGNER) {
+        return Ok(());
+    }
+    remove_feign_death(world, player_guid);
+    session.send_msg(oxcore_shared::messages::MsgTabardVendorActivate { designer_guid })?;
+    Ok(())
+}
+
 /// Handle CMSG_BANKER_ACTIVATE (0x1B5)
 ///
 /// Sent when the client activates a banker directly.

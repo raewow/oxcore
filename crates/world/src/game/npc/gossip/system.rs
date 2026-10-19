@@ -22,7 +22,9 @@ use crate::game::npc::trainer::types::trainer_type;
 use crate::game::player::PlayerManager;
 use crate::World;
 use oxcore_shared::game::reputation::ReputationRank;
-use oxcore_shared::messages::{GossipOptionData, SmsgGossipComplete, SmsgGossipMessage, SmsgShowBank};
+use oxcore_shared::messages::{
+    GossipOptionData, MsgTalentWipeConfirm, SmsgGossipComplete, SmsgGossipMessage, SmsgShowBank,
+};
 use oxcore_shared::protocol::ObjectGuid;
 
 const NPC_FLAG_GOSSIP: u32 = 0x0000_0001;
@@ -374,6 +376,15 @@ impl GossipSystem {
                         .await?;
                 } else if option.action_menu < 0 {
                     self.send_gossip_complete(player_guid);
+                    if let Some(entry) = self
+                        .creature_mgr
+                        .with_creature(source_guid, |c| c.entry)
+                    {
+                        world
+                            .systems
+                            .quest
+                            .talked_to_creature(player_guid, entry, source_guid);
+                    }
                 }
             }
             gossip_option::SPIRITHEALER => {
@@ -390,12 +401,28 @@ impl GossipSystem {
                     );
                 }
             }
+            gossip_option::QUESTGIVER => {
+                let quests = self.quest_menu(world, player_guid, source_guid);
+                self.player_mgr
+                    .with_player_mut(player_guid, |p| p.gossip.quests = quests);
+                self.send_prepared_quest(world, player_guid, source_guid)
+                    .await?;
+            }
             gossip_option::VENDOR | gossip_option::ARMORER => {
+                // A positive sub-menu number picks the vendor's own goods (1), its shared
+                // template (2) or both.
+                let menu = match option.action_menu {
+                    menu if menu > 0 => menu as u32,
+                    _ => crate::game::npc::vendor::manager::VENDOR_MENU_ALL,
+                };
                 world
                     .systems
                     .vendor
-                    .send_vendor_list(player_guid, source_guid)
+                    .send_vendor_menu(player_guid, source_guid, menu)
                     .await?;
+            }
+            gossip_option::STABLEPET => {
+                debug!("Stable masters are not implemented");
             }
             gossip_option::TRAINER => {
                 crate::handlers::trainer_handler::send_trainer_list(
@@ -405,8 +432,33 @@ impl GossipSystem {
                 )
                 .await?;
             }
+            gossip_option::UNLEARNTALENTS => {
+                self.send_gossip_complete(player_guid);
+                let cost = world.systems.talents.reset_cost(player_guid, world);
+                self.broadcast_mgr.send_msg_to_player(
+                    player_guid,
+                    MsgTalentWipeConfirm {
+                        trainer_guid: source_guid,
+                        cost,
+                    },
+                );
+            }
+            gossip_option::UNLEARNPETSKILLS => {
+                // Never offered: hunter pets keep no spell book to untrain.
+                self.send_gossip_complete(player_guid);
+            }
             gossip_option::TAXIVENDOR => {
                 crate::game::taxi::flight::talk_to_flight_master(world, player_guid, source_guid);
+            }
+            gossip_option::INNKEEPER => {
+                // The client confirms the new home with CMSG_BINDER_ACTIVATE.
+                self.send_gossip_complete(player_guid);
+                self.broadcast_mgr.send_msg_to_player(
+                    player_guid,
+                    oxcore_shared::messages::login::SmsgBinderConfirm {
+                        binder: source_guid,
+                    },
+                );
             }
             gossip_option::BANKER => {
                 self.broadcast_mgr.send_msg_to_player(
@@ -419,15 +471,57 @@ impl GossipSystem {
                     p.current_banker_guid = Some(source_guid);
                 });
             }
-            gossip_option::INNKEEPER => {
-                // The client confirms the new home with CMSG_BINDER_ACTIVATE.
+            gossip_option::PETITIONER => {
                 self.send_gossip_complete(player_guid);
                 self.broadcast_mgr.send_msg_to_player(
                     player_guid,
-                    oxcore_shared::messages::login::SmsgBinderConfirm {
-                        binder: source_guid,
+                    oxcore_shared::messages::SmsgPetitionShowlist {
+                        npc_guid: source_guid,
                     },
                 );
+            }
+            gossip_option::TABARDDESIGNER => {
+                self.send_gossip_complete(player_guid);
+                self.broadcast_mgr.send_msg_to_player(
+                    player_guid,
+                    oxcore_shared::messages::MsgTabardVendorActivate {
+                        designer_guid: source_guid,
+                    },
+                );
+            }
+            gossip_option::AUCTIONEER => {
+                if let Some(session) = world.session_mgr.get_session_by_player(player_guid) {
+                    crate::handlers::auction::send_auction_hello_response(
+                        &session,
+                        player_guid,
+                        source_guid,
+                        &world.managers.player_mgr,
+                        &world.managers.creature_mgr,
+                        &world.managers.auction_mgr,
+                    )?;
+                }
+            }
+            gossip_option::SPIRITGUIDE => {
+                self.prepare_gossip_menu(world, player_guid, source_guid, 0);
+                self.send_prepared_gossip(world, player_guid, source_guid)
+                    .await?;
+            }
+            gossip_option::BATTLEFIELD => {
+                let Some(entry) = self.creature_mgr.with_creature(source_guid, |c| c.entry) else {
+                    return Ok(());
+                };
+                match world.managers.battleground_mgr.battlemaster_bg(entry) {
+                    Some(bg_type) => crate::game::battleground::system::send_list(
+                        world,
+                        player_guid,
+                        source_guid,
+                        bg_type,
+                    ),
+                    None => warn!(
+                        "Player {:?} asked creature entry {} for battlegrounds but it is no battlemaster",
+                        player_guid, entry
+                    ),
+                }
             }
             other => {
                 debug!("Gossip option type {} has no handler", other);

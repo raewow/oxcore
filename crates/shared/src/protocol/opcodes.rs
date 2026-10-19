@@ -509,7 +509,10 @@ impl Opcode {
     // ============================================================================
 
     pub const CMSG_BINDER_ACTIVATE: Opcode = Opcode { vanilla: 0x01B5, modern: 0x34B2 }; // 437
-    pub const MSG_TABARDVENDOR_ACTIVATE: Opcode = Opcode { vanilla: 0x01F2, ..Opcode::NONE }; // 498
+    /// The 1.14 request is `CMSG_TABARD_VENDOR_ACTIVATE`; its reply is
+    /// [`Opcode::SMSG_PLAYER_TABARD_VENDOR_ACTIVATE`].
+    pub const MSG_TABARDVENDOR_ACTIVATE: Opcode = Opcode { vanilla: 0x01F2, modern: 0x32A1 }; // 498
+    pub const SMSG_PLAYER_TABARD_VENDOR_ACTIVATE: Opcode = Opcode { modern: 0x3008, ..Opcode::NONE };
 
     // ============================================================================
     // Taxi
@@ -530,6 +533,9 @@ impl Opcode {
 
     pub const CMSG_LEARN_TALENT: Opcode = Opcode { vanilla: 0x0251, modern: 0x3551 }; // 593
     pub const CMSG_UNLEARN_TALENTS: Opcode = Opcode { vanilla: 0x0213, ..Opcode::NONE }; // 531
+    /// The 1.14 request is `CMSG_CONFIRM_RESPEC_WIPE`; its prompt is [`Opcode::SMSG_RESPEC_WIPE_CONFIRM`].
+    pub const MSG_TALENT_WIPE_CONFIRM: Opcode = Opcode { vanilla: 0x02AA, modern: 0x320B }; // 682
+    pub const SMSG_RESPEC_WIPE_CONFIRM: Opcode = Opcode { modern: 0x260B, ..Opcode::NONE };
     pub const CMSG_UNLEARN_SPELL: Opcode = Opcode { vanilla: 0x0201, ..Opcode::NONE }; // 513
     pub const CMSG_UNLEARN_SKILL: Opcode = Opcode { vanilla: 0x0202, modern: 0x34E5 }; // 514
 
@@ -1681,6 +1687,10 @@ pub const ALL: &[(Opcode, &str)] = &[
         "MSG_TABARDVENDOR_ACTIVATE",
     ),
     (
+        Opcode::SMSG_PLAYER_TABARD_VENDOR_ACTIVATE,
+        "SMSG_PLAYER_TABARD_VENDOR_ACTIVATE",
+    ),
+    (
         Opcode::CMSG_TAXINODE_STATUS_QUERY,
         "CMSG_TAXINODE_STATUS_QUERY",
     ),
@@ -1696,6 +1706,8 @@ pub const ALL: &[(Opcode, &str)] = &[
     (Opcode::SMSG_NEW_TAXI_PATH, "SMSG_NEW_TAXI_PATH"),
     (Opcode::CMSG_LEARN_TALENT, "CMSG_LEARN_TALENT"),
     (Opcode::CMSG_UNLEARN_TALENTS, "CMSG_UNLEARN_TALENTS"),
+    (Opcode::MSG_TALENT_WIPE_CONFIRM, "MSG_TALENT_WIPE_CONFIRM"),
+    (Opcode::SMSG_RESPEC_WIPE_CONFIRM, "SMSG_RESPEC_WIPE_CONFIRM"),
     (Opcode::CMSG_UNLEARN_SPELL, "CMSG_UNLEARN_SPELL"),
     (Opcode::CMSG_UNLEARN_SKILL, "CMSG_UNLEARN_SKILL"),
     (Opcode::SMSG_BINDPOINTUPDATE, "SMSG_BINDPOINTUPDATE"),
@@ -2677,8 +2689,8 @@ mod tests {
         // duplicate check would silently start passing on an empty set.
         assert_eq!(
             declared_opcodes().len(),
-            708,
-            "expected 708 opcode constants; update this count deliberately when adding opcodes"
+            711,
+            "expected 711 opcode constants; update this count deliberately when adding opcodes"
         );
     }
 

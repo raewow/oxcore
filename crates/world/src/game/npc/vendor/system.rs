@@ -70,6 +70,17 @@ impl VendorSystem {
         player_guid: ObjectGuid,
         vendor_guid: ObjectGuid,
     ) -> Result<()> {
+        self.send_vendor_menu(player_guid, vendor_guid, super::manager::VENDOR_MENU_ALL)
+            .await
+    }
+
+    /// Shows part of a vendor's stock: see [`super::manager::VendorManager::get_vendor_menu_items`].
+    pub async fn send_vendor_menu(
+        &self,
+        player_guid: ObjectGuid,
+        vendor_guid: ObjectGuid,
+        menu: u32,
+    ) -> Result<()> {
         debug!(
             "Sending vendor list to player {:?} from vendor {:?}",
             player_guid, vendor_guid
@@ -88,8 +99,7 @@ impl VendorSystem {
             creature.entry
         };
 
-        // Get vendor items (includes template items)
-        let items = self.manager.get_vendor_items(entry);
+        let items = self.manager.get_vendor_menu_items(entry, menu);
 
         // Filter by conditions
         let visible_items: Vec<VendorItem> = items

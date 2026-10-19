@@ -468,3 +468,106 @@ async fn sub_menu_option_opens_next_menu() {
         .expect("sub-menu sent");
     assert_eq!(u32::from_le_bytes(menu.data()[8..12].try_into().unwrap()), 2);
 }
+
+// ========== SERVICE OPTIONS ==========
+
+#[tokio::test]
+async fn closing_option_credits_speak_to_objective() {
+    use crate::game::npc::quest::types::{QuestProgress, QuestSpecialFlags, QuestTemplate};
+    let world = test_world();
+    let (player, mut rx) = add_player(&world, 1);
+    let npc = add_npc(&world, NPC_FLAG_GOSSIP);
+    let mut quest = QuestTemplate {
+        id: 10,
+        title: "Speak to the gossiper".to_string(),
+        special_flags: QuestSpecialFlags::SPEAKTO,
+        ..QuestTemplate::default()
+    };
+    quest.req_creature_or_go_id[0] = ENTRY as i32;
+    quest.req_creature_or_go_count[0] = 1;
+    world.systems.quest.manager.add_quest_template(quest);
+    world.managers.player_mgr.with_player_mut(player, |p| {
+        p.active_quests.push(QuestProgress::new(10));
+    });
+    world.managers.player_mgr.with_player_mut(player, |p| {
+        p.gossip = PlayerGossipMenu {
+            source: npc,
+            menu_id: MENU,
+            options: vec![PreparedGossipOption {
+                action: gossip_option::GOSSIP,
+                action_menu: -1,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+    });
+
+    world.systems.gossip.on_gossip_select(&world, player, npc, 0).await.unwrap();
+
+    let packets = opcodes(&sent(&mut rx));
+    assert!(packets.contains(&Opcode::SMSG_GOSSIP_COMPLETE));
+    assert!(packets.contains(&Opcode::SMSG_QUESTUPDATE_ADD_KILL));
+    let count = world
+        .managers
+        .player_mgr
+        .with_player(player, |p| p.active_quests[0].creature_or_go_count[0])
+        .unwrap();
+    assert_eq!(count, 1);
+}
+
+#[tokio::test]
+async fn quest_option_opens_the_quest() {
+    use crate::game::npc::quest::types::QuestTemplate;
+    let world = test_world();
+    let (player, mut rx) = add_player(&world, 1);
+    let npc = add_npc(&world, NPC_FLAG_GOSSIP | 0x02);
+    world.systems.quest.manager.add_quest_template(QuestTemplate {
+        id: 11,
+        title: "Errand".to_string(),
+        quest_level: 5,
+        ..QuestTemplate::default()
+    });
+    world.systems.quest.manager.add_creature_quest_starter(ENTRY, 11);
+    show_option(&world, player, npc, gossip_option::QUESTGIVER);
+
+    world.systems.gossip.on_gossip_select(&world, player, npc, 0).await.unwrap();
+
+    assert!(opcodes(&sent(&mut rx)).contains(&Opcode::SMSG_QUESTGIVER_QUEST_DETAILS));
+}
+
+#[tokio::test]
+async fn unlearn_talents_option_asks_for_confirmation() {
+    let world = test_world();
+    let (player, mut rx) = add_player(&world, 1);
+    let npc = add_npc(&world, NPC_FLAG_TRAINER);
+    show_option(&world, player, npc, gossip_option::UNLEARNTALENTS);
+
+    world.systems.gossip.on_gossip_select(&world, player, npc, 0).await.unwrap();
+
+    let packets = sent(&mut rx);
+    assert!(opcodes(&packets).contains(&Opcode::SMSG_GOSSIP_COMPLETE));
+    let confirm = packets
+        .iter()
+        .find(|p| p.opcode() == Opcode::MSG_TALENT_WIPE_CONFIRM)
+        .expect("talent wipe prompt sent");
+    assert_eq!(&confirm.data()[0..8], &npc.raw().to_le_bytes()[..]);
+}
+
+#[tokio::test]
+async fn guild_options_open_their_windows() {
+    for (action, opcode) in [
+        (gossip_option::PETITIONER, Opcode::SMSG_PETITION_SHOWLIST),
+        (gossip_option::TABARDDESIGNER, Opcode::MSG_TABARDVENDOR_ACTIVATE),
+    ] {
+        let world = test_world();
+        let (player, mut rx) = add_player(&world, 1);
+        let npc = add_npc(&world, 0x200 | 0x400);
+        show_option(&world, player, npc, action);
+
+        world.systems.gossip.on_gossip_select(&world, player, npc, 0).await.unwrap();
+
+        let packets = opcodes(&sent(&mut rx));
+        assert!(packets.contains(&Opcode::SMSG_GOSSIP_COMPLETE));
+        assert!(packets.contains(&opcode), "{opcode:?} not sent: {packets:?}");
+    }
+}

@@ -375,3 +375,63 @@ mod tests {
         );
     }
 }
+
+/// MSG_TALENT_WIPE_CONFIRM - asks the player to confirm resetting their talents for `cost`
+/// copper. An empty trainer GUID tells them they have no talents to reset.
+#[derive(Debug, Clone)]
+pub struct MsgTalentWipeConfirm {
+    pub trainer_guid: ObjectGuid,
+    pub cost: u32,
+}
+
+impl ToWorldPacket for MsgTalentWipeConfirm {
+    fn to_vanilla(&self) -> WorldPacket {
+        let mut packet = WorldPacket::new(Opcode::MSG_TALENT_WIPE_CONFIRM);
+        packet.write_guid(self.trainer_guid);
+        packet.write_u32(self.cost);
+        packet
+    }
+
+    /// `SMSG_RESPEC_WIPE_CONFIRM` in 1.14: a respec kind (0, talents) ahead of the cost, and
+    /// the trainer's GUID packed at the end.
+    fn to_modern(&self) -> Option<WorldPacket> {
+        const RESPEC_TALENTS: u8 = 0;
+        let mut writer = BitWriter::new();
+        writer.write_u8(RESPEC_TALENTS);
+        writer.write_u32(self.cost);
+        let (high, low) = self.trainer_guid.to_guid128(DEFAULT_REALM_ID);
+        writer.write_packed_guid_128(high, low);
+        Some(writer.finish(Opcode::SMSG_RESPEC_WIPE_CONFIRM))
+    }
+}
+
+#[cfg(test)]
+mod talent_wipe_tests {
+    use super::*;
+
+    #[test]
+    fn vanilla_talent_wipe_confirm_is_guid_then_cost() {
+        let guid = ObjectGuid::from_raw(0xF130_0000_1234_0001);
+        let packet = MsgTalentWipeConfirm {
+            trainer_guid: guid,
+            cost: 10_000,
+        }
+        .to_vanilla();
+        assert_eq!(packet.opcode(), Opcode::MSG_TALENT_WIPE_CONFIRM);
+        assert_eq!(&packet.data()[0..8], &guid.raw().to_le_bytes());
+        assert_eq!(&packet.data()[8..12], &10_000u32.to_le_bytes());
+    }
+
+    #[test]
+    fn modern_talent_wipe_confirm_leads_with_kind_and_cost() {
+        let packet = MsgTalentWipeConfirm {
+            trainer_guid: ObjectGuid::from_raw(0xF130_0000_1234_0001),
+            cost: 10_000,
+        }
+        .to_modern()
+        .unwrap();
+        assert_eq!(packet.opcode(), Opcode::SMSG_RESPEC_WIPE_CONFIRM);
+        assert_eq!(packet.data()[0], 0);
+        assert_eq!(&packet.data()[1..5], &10_000u32.to_le_bytes());
+    }
+}
