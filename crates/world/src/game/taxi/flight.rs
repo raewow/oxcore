@@ -204,6 +204,23 @@ pub fn talk_to_flight_master(world: &World, player_guid: ObjectGuid, npc: Object
     let Some(node) = flight_master_node(world, player_guid, npc) else {
         return;
     };
+    if learn_node(world, player_guid, npc, node) {
+        return;
+    }
+    send_taxi_menu(world, player_guid, npc, node);
+}
+
+/// Greeting a flight master teaches its flight point. True when the point was new, or
+/// when the flight master has none (so there is no map to show either).
+pub fn learn_flight_master_node(world: &World, player_guid: ObjectGuid, npc: ObjectGuid) -> bool {
+    match flight_master_node(world, player_guid, npc) {
+        Some(node) => learn_node(world, player_guid, npc, node),
+        None => true,
+    }
+}
+
+/// Teach the player `node` and tell them, if they did not know it.
+fn learn_node(world: &World, player_guid: ObjectGuid, npc: ObjectGuid, node: u32) -> bool {
     let learned = world
         .managers
         .player_mgr
@@ -220,9 +237,8 @@ pub fn talk_to_flight_master(world: &World, player_guid: ObjectGuid, npc: Object
             },
         );
         save(world, player_guid);
-        return;
     }
-    send_taxi_menu(world, player_guid, npc, node);
+    learned
 }
 
 fn send_taxi_menu(world: &World, player_guid: ObjectGuid, npc: ObjectGuid, node: u32) {

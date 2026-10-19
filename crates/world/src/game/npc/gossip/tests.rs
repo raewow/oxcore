@@ -661,3 +661,26 @@ async fn option_marks_its_point_of_interest_before_the_next_menu() {
     assert_eq!(packets[0], Opcode::SMSG_GOSSIP_POI);
     assert!(packets.contains(&Opcode::SMSG_GOSSIP_MESSAGE));
 }
+
+// ========== FLIGHT MASTERS ==========
+
+#[tokio::test]
+async fn flight_master_greeting_teaches_node_instead_of_a_menu() {
+    const NPC_FLAG_FLIGHTMASTER: u32 = 0x08;
+    let world = test_world();
+    let (player, mut rx) = add_player(&world, 1);
+    let npc = add_npc(&world, NPC_FLAG_GOSSIP | NPC_FLAG_FLIGHTMASTER);
+    let gossip = &world.systems.gossip_manager;
+    gossip.add_menu(menu_row(MENU, 1, 0));
+    gossip.add_menu_item(option(MENU, 0, gossip_option::TAXIVENDOR, NPC_FLAG_FLIGHTMASTER, 0));
+
+    world.systems.gossip.gossip_hello(&world, player, npc).await.unwrap();
+
+    let discovered = world
+        .managers
+        .player_mgr
+        .with_player(player, |p| p.gossip.discovered_node)
+        .unwrap();
+    assert!(discovered);
+    assert!(!opcodes(&sent(&mut rx)).contains(&Opcode::SMSG_GOSSIP_MESSAGE));
+}

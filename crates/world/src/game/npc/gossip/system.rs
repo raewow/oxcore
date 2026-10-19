@@ -188,6 +188,7 @@ impl GossipSystem {
         }
 
         let mut options = Vec::new();
+        let mut discovered_node = false;
         for item in &items {
             let mut shown_to_gm_only = false;
             if item.condition_id != 0
@@ -205,8 +206,20 @@ impl GossipSystem {
 
             let shown = match source {
                 GossipSource::Creature { entry, npc_flags } => {
-                    item.npc_option_npcflag & npc_flags != 0
-                        && self.creature_option_shown(world, item, entry, &viewer, player_guid)
+                    if item.npc_option_npcflag & npc_flags == 0 {
+                        continue;
+                    }
+                    // Greeting a flight master teaches its flight point.
+                    if item.option_id == gossip_option::TAXIVENDOR
+                        && crate::game::taxi::flight::learn_flight_master_node(
+                            world,
+                            player_guid,
+                            source_guid,
+                        )
+                    {
+                        discovered_node = true;
+                    }
+                    self.creature_option_shown(world, item, entry, &viewer, player_guid)
                 }
                 GossipSource::GameObject { go_type } => {
                     item.option_id == gossip_option::GOSSIP
@@ -247,7 +260,7 @@ impl GossipSystem {
                 menu_id,
                 options,
                 quests,
-                discovered_node: false,
+                discovered_node,
             };
         });
     }
