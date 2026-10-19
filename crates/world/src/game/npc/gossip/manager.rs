@@ -24,9 +24,7 @@ pub struct GossipManager {
     npc_texts: DashMap<u32, NpcText>,
     /// Broadcast text by entry ID
     broadcast_texts: DashMap<u32, BroadcastText>,
-    /// Default gossip menu ID by creature entry
-    creature_default_menus: DashMap<u32, u32>,
-    /// Gossip text override by creature spawn guid low
+    /// Greeting text by creature spawn database guid
     npc_gossip_texts: DashMap<u32, u32>,
 }
 
@@ -39,7 +37,6 @@ impl GossipManager {
             menu_items: DashMap::new(),
             npc_texts: DashMap::new(),
             broadcast_texts: DashMap::new(),
-            creature_default_menus: DashMap::new(),
             npc_gossip_texts: DashMap::new(),
         }
     }
@@ -140,22 +137,16 @@ impl GossipManager {
             });
         }
 
-        // Load creature default menus
-        for row in &data.creature_menus {
-            self.set_creature_menu(row.entry.try_into()?, row.gossip_menu_id.try_into()?);
-        }
-
         for row in &data.npc_gossip {
             self.set_npc_gossip_text(row.npc_guid.try_into()?, row.textid.try_into()?);
         }
 
         info!(
-            "GossipManager loaded: {} menus, {} options, {} npc_texts, {} broadcast_texts, {} creature_menus, {} npc_gossip overrides",
+            "GossipManager loaded: {} menus, {} options, {} npc_texts, {} broadcast_texts, {} npc_gossip overrides",
             data.menus.len(),
             data.options.len(),
             data.npc_texts.len(),
             data.broadcast_texts.len(),
-            data.creature_menus.len(),
             data.npc_gossip.len()
         );
 
@@ -188,11 +179,6 @@ impl GossipManager {
         self.broadcast_texts.get(&entry).map(|t| t.clone())
     }
 
-    /// Get default gossip menu ID for a creature
-    pub fn get_creature_menu_id(&self, entry: u32) -> Option<u32> {
-        self.creature_default_menus.get(&entry).map(|v| *v)
-    }
-
     /// Add a gossip menu
     pub fn add_menu(&self, menu: GossipMenu) {
         self.menus
@@ -219,40 +205,13 @@ impl GossipManager {
         self.broadcast_texts.insert(text.entry, text);
     }
 
-    /// Set default gossip menu for a creature
-    pub fn set_creature_menu(&self, entry: u32, menu_id: u32) {
-        self.creature_default_menus.insert(entry, menu_id);
+    /// Greeting text for one creature spawn, by its database guid
+    pub fn get_npc_gossip_text(&self, spawn_id: u32) -> Option<u32> {
+        self.npc_gossip_texts.get(&spawn_id).map(|v| *v)
     }
 
-    /// Get per-creature gossip text override by spawn guid low
-    pub fn get_npc_gossip_text(&self, npc_guid_low: u32) -> Option<u32> {
-        self.npc_gossip_texts.get(&npc_guid_low).map(|v| *v)
-    }
-
-    /// Set per-creature gossip text override by spawn guid low
-    pub fn set_npc_gossip_text(&self, npc_guid_low: u32, text_id: u32) {
-        self.npc_gossip_texts.insert(npc_guid_low, text_id);
-    }
-
-    /// Get the text ID for a menu entry
-    /// Returns the first menu's text_id (for simple cases without conditions)
-    pub fn get_text_id(&self, entry: u32) -> Option<u32> {
-        self.menus
-            .get(&entry)
-            .and_then(|v| v.first().map(|m| m.text_id))
-    }
-
-    /// Get localized text for a broadcast text entry
-    /// Returns male text if available, female text as fallback
-    pub fn get_localized_text(&self, entry: u32, _is_female: bool) -> Option<String> {
-        self.get_broadcast_text(entry)
-            .map(|t| {
-                if t.male_text.is_empty() {
-                    t.female_text
-                } else {
-                    t.male_text
-                }
-            })
-            .filter(|s| !s.is_empty())
+    /// Set the greeting text for one creature spawn, by its database guid
+    pub fn set_npc_gossip_text(&self, spawn_id: u32, text_id: u32) {
+        self.npc_gossip_texts.insert(spawn_id, text_id);
     }
 }

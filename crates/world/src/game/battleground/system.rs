@@ -364,7 +364,7 @@ pub fn send_list(world: &World, player: ObjectGuid, battlemaster: ObjectGuid, bg
 }
 
 /// Whether a player's level lets them into a battleground.
-fn has_level_access(world: &World, player: ObjectGuid, bg_type: BattleGroundTypeId) -> bool {
+pub(crate) fn has_level_access(world: &World, player: ObjectGuid, bg_type: BattleGroundTypeId) -> bool {
     let level = level_of(world, player);
     world
         .managers

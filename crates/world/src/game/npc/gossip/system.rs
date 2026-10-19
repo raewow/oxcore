@@ -1,21 +1,84 @@
 //! Gossip System - business logic for NPC gossip
 //!
-//! Handles sending gossip menus to players, processing option selections,
-//! filtering by conditions and NPC flags, and integration with quests.
+//! Builds the menu a player sees at a creature or game object, keeps it on the player so
+//! the option they pick can be checked against what they were shown, and carries out
+//! that option.
 
 use anyhow::Result;
 use std::sync::Arc;
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 use super::manager::GossipManager;
-use super::types::{gossip_option, GossipMenuItem, DEFAULT_GOSSIP_MESSAGE};
-use crate::game::broadcast_mgr::{BroadcastManager, BroadcastManagerExt};
-use crate::game::creature::CreatureManager;
-use crate::game::player::PlayerManager;
-use oxcore_shared::messages::{
-    GossipOptionData, SmsgGossipComplete, SmsgGossipMessage, SmsgShowBank,
+use super::types::{
+    gossip_option, GossipMenuItem, PlayerGossipMenu, PreparedGossipOption,
+    DEFAULT_GOSSIP_MESSAGE,
 };
+use crate::game::broadcast_mgr::{BroadcastManager, BroadcastManagerExt};
+use crate::game::conditions::ConditionContext;
+use crate::game::creature::CreatureManager;
+use crate::game::gameobject::GameObjectType;
+use crate::game::npc::quest::types::GossipQuestData;
+use crate::game::npc::trainer::types::trainer_type;
+use crate::game::player::PlayerManager;
+use crate::World;
+use oxcore_shared::game::reputation::ReputationRank;
+use oxcore_shared::messages::{GossipOptionData, SmsgGossipComplete, SmsgGossipMessage, SmsgShowBank};
 use oxcore_shared::protocol::ObjectGuid;
+
+const NPC_FLAG_GOSSIP: u32 = 0x0000_0001;
+const NPC_FLAG_QUESTGIVER: u32 = 0x0000_0002;
+const NPC_FLAG_VENDOR: u32 = 0x0000_0004;
+
+const CLASS_HUNTER: u8 = 3;
+
+/// Appended to options a game master sees only because they bypass its condition.
+const GM_MODE_SUFFIX: &str = " (GM mode is ON)";
+
+/// What a gossip menu belongs to.
+#[derive(Debug, Clone, Copy)]
+enum GossipSource {
+    Creature { entry: u32, npc_flags: u32 },
+    GameObject { go_type: GameObjectType },
+}
+
+impl GossipSource {
+    fn resolve(world: &World, guid: ObjectGuid) -> Option<Self> {
+        if guid.is_game_object() {
+            world
+                .managers
+                .gameobject_mgr
+                .with_gameobject(guid, |go| GossipSource::GameObject {
+                    go_type: go.go_type,
+                })
+        } else {
+            world
+                .managers
+                .creature_mgr
+                .with_creature(guid, |c| GossipSource::Creature {
+                    entry: c.entry,
+                    npc_flags: c.npc_flags,
+                })
+        }
+    }
+}
+
+/// The player details option filtering looks at.
+struct Viewer {
+    game_master: bool,
+    alive: bool,
+    class: u8,
+    race: u8,
+    level: u8,
+    gender: u8,
+}
+
+/// Greeting shown above a quest list.
+#[derive(Debug, Clone, Default)]
+pub struct QuestListGreeting {
+    pub text: String,
+    pub emote_delay: u32,
+    pub emote: u32,
+}
 
 /// Gossip system - handles gossip menu business logic
 pub struct GossipSystem {
@@ -46,423 +109,637 @@ impl GossipSystem {
         }
     }
 
-    /// Send gossip menu to a player
-    ///
-    /// # Arguments
-    /// * `player_guid` - The player's GUID
-    /// * `npc_guid` - The NPC's GUID
-    /// * `menu_id_override` - Optional menu ID to use instead of creature's default
-    /// * `quest_data` - Optional quest data for quest giver NPCs
-    pub async fn send_gossip_menu(
-        &self,
-        player_guid: ObjectGuid,
-        npc_guid: ObjectGuid,
-        menu_id_override: Option<u32>,
-        quest_data: Option<Vec<oxcore_shared::messages::GossipQuestData>>,
-    ) -> Result<()> {
-        debug!(
-            "Sending gossip menu to player {:?} from NPC {:?}",
-            player_guid, npc_guid
-        );
-
-        // Get creature entry and npc_flags from CreatureManager
-        let (entry, npc_flags) = {
-            let creature = self
-                .creature_mgr
-                .get_creature(npc_guid)
-                .ok_or_else(|| anyhow::anyhow!("Creature {:?} not found", npc_guid))?;
-            (creature.entry, creature.npc_flags)
-        };
-
-        // Determine which menu to show
-        let menu_id = menu_id_override
-            .or_else(|| self.manager.get_creature_menu_id(entry))
-            .unwrap_or(0);
-
-        // Get the gossip menu - use default if not found
-        let menus = self.manager.get_menus(menu_id);
-        let default_menu = Arc::new(super::types::GossipMenu {
-            entry: menu_id,
-            text_id: DEFAULT_GOSSIP_MESSAGE,
-            script_id: 0,
-            condition_id: 0,
-        });
-        let menu = menus.first().cloned().unwrap_or(default_menu);
-        let source_text_id = self
-            .manager
-            .get_npc_gossip_text(npc_guid.low())
-            .unwrap_or(DEFAULT_GOSSIP_MESSAGE);
-        let text_id = if menu_id == 0 {
-            source_text_id
-        } else {
-            menu.text_id
-        };
-
-        // Get menu items
-        let items = self.manager.get_menu_items(menu_id);
-
-        // Filter items by conditions and NPC flags
-        let filtered_items = self.filter_menu_items(&items, npc_flags, player_guid);
-
-        // Build gossip options
-        let options: Vec<GossipOptionData> = filtered_items
-            .iter()
-            .map(|item| GossipOptionData {
-                index: item.id,
-                icon: item.option_icon,
-                coded: item.box_coded,
-                money: item.box_money,
-                text: item.option_text.clone(),
-            })
-            .collect();
-
-        // Get quest items if NPC is a quest giver
-        let quests = quest_data.unwrap_or_default();
-
-        // Build and send the gossip message
-        let msg = SmsgGossipMessage {
-            source_guid: npc_guid,
-            menu_id,
-            text_id,
-            options,
-            quests,
-        };
-
-        info!(
-            "Sending SMSG_GOSSIP_MESSAGE: npc={:?}, menu_id={}, text_id={}, options={}, quests={}",
-            npc_guid,
-            menu_id,
-            text_id,
-            msg.options.len(),
-            msg.quests.len()
-        );
-        for opt in &msg.options {
-            info!(
-                "  gossip opt: index={} icon={} coded={} text={:?}",
-                opt.index, opt.icon, opt.coded, opt.text
-            );
+    /// The menu a creature or game object opens with.
+    pub fn default_menu_id(&self, world: &World, source: ObjectGuid) -> u32 {
+        if source.is_game_object() {
+            let Some(entry) = world
+                .managers
+                .gameobject_mgr
+                .with_gameobject(source, |go| go.entry)
+            else {
+                return 0;
+            };
+            return world
+                .managers
+                .gameobject_mgr
+                .get_template(entry)
+                .map(|t| t.gossip_menu_id())
+                .unwrap_or(0);
         }
-
-        // Debug: dump raw packet bytes
-        let raw_pkt = oxcore_shared::messages::ToWorldPacket::to_vanilla(&msg);
-        let raw_bytes = raw_pkt.data();
-        let preview = raw_bytes.len().min(80);
-        info!(
-            "SMSG_GOSSIP_MESSAGE raw ({} bytes): {:02X?}",
-            raw_bytes.len(),
-            &raw_bytes[..preview]
-        );
-
-        self.broadcast_mgr.send_msg_to_player(player_guid, msg);
-
-        // Track the current gossip menu for this player
-        if let Some(mut player) = self.player_mgr.get_player_mut(player_guid) {
-            player.current_gossip_menu_id = Some(menu_id);
-        }
-
-        info!(
-            "Sent gossip menu {} (text_id {}) to player {:?} from NPC {:?}",
-            menu_id, text_id, player_guid, npc_guid
-        );
-
-        Ok(())
+        self.creature_mgr
+            .with_creature(source, |c| c.entry)
+            .and_then(|entry| self.creature_mgr.get_template(entry))
+            .map(|t| t.gossip_menu_id)
+            .unwrap_or(0)
     }
 
-    pub async fn send_gameobject_gossip_menu(
+    /// Opens `source`'s default menu for `player`.
+    pub async fn gossip_hello(
         &self,
+        world: &World,
         player_guid: ObjectGuid,
-        go_guid: ObjectGuid,
-        menu_id: u32,
-        quest_data: Option<Vec<oxcore_shared::messages::GossipQuestData>>,
+        source: ObjectGuid,
     ) -> Result<()> {
-        let menus = self.manager.get_menus(menu_id);
-        let text_id = menus
-            .first()
-            .map(|menu| menu.text_id)
-            .unwrap_or(DEFAULT_GOSSIP_MESSAGE);
-        let items = self.manager.get_menu_items(menu_id);
-        let options: Vec<GossipOptionData> = items
-            .iter()
-            .filter(|item| item.option_id == gossip_option::GOSSIP)
-            .map(|item| GossipOptionData {
-                index: item.id,
-                icon: item.option_icon,
-                coded: item.box_coded,
-                money: item.box_money,
-                text: item.option_text.clone(),
-            })
-            .collect();
-        let quests = quest_data.unwrap_or_default();
+        let menu_id = self.default_menu_id(world, source);
+        self.prepare_gossip_menu(world, player_guid, source, menu_id);
+        self.send_prepared_gossip(world, player_guid, source).await
+    }
 
-        if menu_id == 0
-            && options.is_empty()
-            && quests.is_empty()
+    /// Builds menu `menu_id` of `source` as `player_guid` should see it and keeps it on the
+    /// player. Options are dropped when their condition fails, when the creature lacks the
+    /// NPC flag they need, or when the service does not apply to this player. The source's
+    /// quests are listed only on its default menu.
+    pub fn prepare_gossip_menu(
+        &self,
+        world: &World,
+        player_guid: ObjectGuid,
+        source_guid: ObjectGuid,
+        menu_id: u32,
+    ) {
+        let Some(source) = GossipSource::resolve(world, source_guid) else {
+            return;
+        };
+        let Some(viewer) = self.player_mgr.with_player(player_guid, |p| Viewer {
+            game_master: p.gm_mode,
+            alive: p.is_alive(),
+            class: p.class,
+            race: p.race,
+            level: p.level,
+            gender: p.gender,
+        }) else {
+            return;
+        };
+
+        let default_menu = menu_id == self.default_menu_id(world, source_guid);
+        let mut can_see_quests = default_menu
+            && match source {
+                GossipSource::Creature { npc_flags, .. } => npc_flags & NPC_FLAG_QUESTGIVER != 0,
+                GossipSource::GameObject { go_type } => go_type == GameObjectType::QuestGiver,
+            };
+
+        // A default menu without options of its own offers the shared service options.
+        let mut items = self.manager.get_menu_items(menu_id);
+        if items.is_empty() && default_menu {
+            items = self.manager.get_menu_items(0);
+        }
+
+        let mut options = Vec::new();
+        for item in &items {
+            let mut shown_to_gm_only = false;
+            if item.condition_id != 0
+                && !self.condition_met(world, item.condition_id, player_guid, source_guid)
+            {
+                if viewer.game_master {
+                    shown_to_gm_only = true;
+                } else {
+                    if item.option_id == gossip_option::QUESTGIVER {
+                        can_see_quests = false;
+                    }
+                    continue;
+                }
+            }
+
+            let shown = match source {
+                GossipSource::Creature { entry, npc_flags } => {
+                    item.npc_option_npcflag & npc_flags != 0
+                        && self.creature_option_shown(world, item, entry, &viewer, player_guid)
+                }
+                GossipSource::GameObject { go_type } => {
+                    item.option_id == gossip_option::GOSSIP
+                        && matches!(go_type, GameObjectType::QuestGiver | GameObjectType::Goober)
+                }
+            };
+            if !shown {
+                continue;
+            }
+
+            let mut text = self.text_or_broadcast(&item.option_text, item.option_broadcast_text, viewer.gender);
+            if shown_to_gm_only {
+                text.push_str(GM_MODE_SUFFIX);
+            }
+            options.push(PreparedGossipOption {
+                icon: item.option_icon,
+                text,
+                coded: item.box_coded,
+                box_text: self.text_or_broadcast(&item.box_text, item.box_broadcast_text, viewer.gender),
+                box_money: item.box_money,
+                sender: 0,
+                action: item.option_id,
+                action_menu: item.action_menu_id,
+                action_poi: item.action_poi_id,
+                action_script: item.action_script_id,
+            });
+        }
+
+        let quests = if can_see_quests {
+            self.quest_menu(world, player_guid, source_guid)
+        } else {
+            Vec::new()
+        };
+
+        self.player_mgr.with_player_mut(player_guid, |p| {
+            p.gossip = PlayerGossipMenu {
+                source: source_guid,
+                menu_id,
+                options,
+                quests,
+                discovered_node: false,
+            };
+        });
+    }
+
+    /// Shows the menu prepared for `player_guid`: a quest-only creature (or a game object
+    /// without a menu) opens its quests directly, anything else gets the gossip window.
+    pub async fn send_prepared_gossip(
+        &self,
+        world: &World,
+        player_guid: ObjectGuid,
+        source_guid: ObjectGuid,
+    ) -> Result<()> {
+        let Some(menu) = self.player_mgr.with_player(player_guid, |p| p.gossip.clone()) else {
+            return Ok(());
+        };
+        let Some(source) = GossipSource::resolve(world, source_guid) else {
+            return Ok(());
+        };
+
+        match source {
+            GossipSource::Creature { npc_flags, .. } => {
+                if menu.discovered_node && menu.quests.is_empty() {
+                    return Ok(());
+                }
+                // Without the gossip flag the client expects the quest window itself; vendors
+                // keep their gossip window so the trade option stays reachable. A gossip NPC
+                // with no menu at all and nothing else to offer also goes straight to its
+                // quests rather than a placeholder greeting.
+                let nothing_to_say = menu.menu_id == 0 && menu.options.is_empty();
+                if (npc_flags & NPC_FLAG_GOSSIP == 0 || nothing_to_say)
+                    && npc_flags & NPC_FLAG_VENDOR == 0
+                    && !menu.quests.is_empty()
+                {
+                    return self.send_prepared_quest(world, player_guid, source_guid).await;
+                }
+            }
+            GossipSource::GameObject { .. } => {
+                if menu.menu_id == 0 && !menu.quests.is_empty() {
+                    return self.send_prepared_quest(world, player_guid, source_guid).await;
+                }
+            }
+        }
+
+        let text_id = if menu.menu_id != 0 {
+            self.gossip_text_id(world, player_guid, source_guid, menu.menu_id)
+        } else {
+            self.source_text_id(world, source_guid)
+        };
+
+        // Game objects with nothing to say stay silent.
+        if matches!(source, GossipSource::GameObject { .. })
+            && menu.options.is_empty()
+            && menu.quests.is_empty()
             && text_id == DEFAULT_GOSSIP_MESSAGE
         {
             return Ok(());
         }
 
-        self.broadcast_mgr.send_msg_to_player(
-            player_guid,
-            SmsgGossipMessage {
-                source_guid: go_guid,
-                menu_id,
-                text_id,
-                options,
-                quests,
-            },
-        );
+        self.send_gossip_menu(player_guid, source_guid, &menu, text_id);
+        Ok(())
+    }
 
-        if let Some(mut player) = self.player_mgr.get_player_mut(player_guid) {
-            player.current_gossip_menu_id = Some(menu_id);
+    /// Opens the quest window for the prepared quest list: a single quest goes straight to
+    /// its details or turn-in window, several are listed under the source's greeting.
+    pub async fn send_prepared_quest(
+        &self,
+        world: &World,
+        player_guid: ObjectGuid,
+        source_guid: ObjectGuid,
+    ) -> Result<()> {
+        let Some(quests) = self
+            .player_mgr
+            .with_player(player_guid, |p| p.gossip.quests.clone())
+        else {
+            return Ok(());
+        };
+        let Some(first) = quests.first() else {
+            return Ok(());
+        };
+
+        let quest_system = &world.systems.quest;
+        if quests.len() == 1 {
+            return quest_system
+                .send_single_quest(player_guid, source_guid, first.quest_id, first.icon, world)
+                .await;
+        }
+
+        let greeting = self.quest_list_greeting(world, player_guid, source_guid);
+        quest_system.send_quest_list(player_guid, source_guid, &quests, &greeting);
+        Ok(())
+    }
+
+    /// Carries out option `list_index` of the menu `player_guid` was shown at `source_guid`.
+    /// Options that were never shown, or belong to another menu, are ignored.
+    pub async fn on_gossip_select(
+        &self,
+        world: &World,
+        player_guid: ObjectGuid,
+        source_guid: ObjectGuid,
+        list_index: u32,
+    ) -> Result<()> {
+        let Some(option) = self.shown_option(player_guid, source_guid, list_index) else {
+            debug!(
+                "Player {:?} picked gossip option {} that {:?} never offered",
+                player_guid, list_index, source_guid
+            );
+            return Ok(());
+        };
+
+        if source_guid.is_game_object() && option.action > gossip_option::QUESTGIVER {
+            warn!(
+                "Player {:?} requested a service option from game object {:?}",
+                player_guid, source_guid
+            );
+            return Ok(());
+        }
+
+        match option.action {
+            gossip_option::GOSSIP => {
+                if option.action_menu > 0 {
+                    self.prepare_gossip_menu(
+                        world,
+                        player_guid,
+                        source_guid,
+                        option.action_menu as u32,
+                    );
+                    self.send_prepared_gossip(world, player_guid, source_guid)
+                        .await?;
+                } else if option.action_menu < 0 {
+                    self.send_gossip_complete(player_guid);
+                }
+            }
+            gossip_option::SPIRITHEALER => {
+                let dead = self
+                    .player_mgr
+                    .with_player(player_guid, |p| !p.is_alive())
+                    .unwrap_or(false);
+                if dead {
+                    self.broadcast_mgr.send_msg_to_player(
+                        player_guid,
+                        oxcore_shared::messages::death::SmsgSpiritHealerConfirm {
+                            healer_guid: source_guid,
+                        },
+                    );
+                }
+            }
+            gossip_option::VENDOR | gossip_option::ARMORER => {
+                world
+                    .systems
+                    .vendor
+                    .send_vendor_list(player_guid, source_guid)
+                    .await?;
+            }
+            gossip_option::TRAINER => {
+                crate::handlers::trainer_handler::send_trainer_list(
+                    player_guid,
+                    source_guid,
+                    world,
+                )
+                .await?;
+            }
+            gossip_option::TAXIVENDOR => {
+                crate::game::taxi::flight::talk_to_flight_master(world, player_guid, source_guid);
+            }
+            gossip_option::BANKER => {
+                self.broadcast_mgr.send_msg_to_player(
+                    player_guid,
+                    SmsgShowBank {
+                        banker_guid: source_guid,
+                    },
+                );
+                self.player_mgr.with_player_mut(player_guid, |p| {
+                    p.current_banker_guid = Some(source_guid);
+                });
+            }
+            gossip_option::INNKEEPER => {
+                // The client confirms the new home with CMSG_BINDER_ACTIVATE.
+                self.send_gossip_complete(player_guid);
+                self.broadcast_mgr.send_msg_to_player(
+                    player_guid,
+                    oxcore_shared::messages::login::SmsgBinderConfirm {
+                        binder: source_guid,
+                    },
+                );
+            }
+            other => {
+                debug!("Gossip option type {} has no handler", other);
+            }
         }
 
         Ok(())
     }
 
-    /// Handle gossip option selection
-    ///
-    /// # Arguments
-    /// * `player_guid` - The player's GUID
-    /// * `npc_guid` - The NPC's GUID
-    /// * `menu_id` - The current menu ID
-    /// * `option_id` - The selected option ID
-    pub async fn handle_option_select(
+    /// The option at `list_index` of the menu `player_guid` was shown at `source_guid`.
+    pub fn shown_option(
         &self,
         player_guid: ObjectGuid,
-        npc_guid: ObjectGuid,
-        menu_id: u32,
-        option_id: u32,
-    ) -> Result<()> {
-        debug!(
-            "Player {:?} selected option {} from menu {} on NPC {:?}",
-            player_guid, option_id, menu_id, npc_guid
-        );
-
-        // Get menu items and find the selected one
-        let items = self.manager.get_menu_items(menu_id);
-        let option = items
-            .iter()
-            .find(|item| item.id == option_id)
-            .ok_or_else(|| {
-                anyhow::anyhow!("Gossip option {} not found in menu {}", option_id, menu_id)
-            })?
-            .clone();
-
-        // Handle based on option type
-        match option.option_id {
-            gossip_option::GOSSIP => {
-                if option.action_menu_id > 0 {
-                    // Open sub-menu
-                    self.send_gossip_menu(
-                        player_guid,
-                        npc_guid,
-                        Some(option.action_menu_id as u32),
-                        None,
-                    )
-                    .await?;
-                } else if option.action_menu_id == 0 {
-                    // Keep same menu (usually for scripted interactions)
-                    self.send_gossip_menu(player_guid, npc_guid, Some(menu_id), None)
-                        .await?;
-                } else {
-                    // Close gossip
-                    self.send_gossip_complete(player_guid);
-                }
-            }
-            gossip_option::VENDOR | gossip_option::ARMORER => {
-                // Do NOT send SMSG_GOSSIP_COMPLETE — the vendor window replaces gossip.
-                info!(
-                    "Vendor option selected for player {:?} from NPC {:?}",
-                    player_guid, npc_guid
-                );
-            }
-            gossip_option::TRAINER => {
-                // Do NOT send SMSG_GOSSIP_COMPLETE — the trainer window replaces gossip.
-                info!("Trainer option selected - would open trainer window");
-            }
-            gossip_option::TAXIVENDOR => {
-                // Close gossip; the handler then opens the flight map.
-                self.send_gossip_complete(player_guid);
-            }
-            gossip_option::BANKER => {
-                info!(
-                    "Banker option selected for player {:?} from NPC {:?}",
-                    player_guid, npc_guid
-                );
-                self.broadcast_mgr.send_msg_to_player(
-                    player_guid,
-                    SmsgShowBank {
-                        banker_guid: npc_guid,
-                    },
-                );
-                if let Some(mut player) = self.player_mgr.get_player_mut(player_guid) {
-                    player.current_banker_guid = Some(npc_guid);
-                    player.current_gossip_menu_id = None;
-                }
-            }
-            gossip_option::AUCTIONEER => {
-                // Close gossip, open auction
-                self.send_gossip_complete(player_guid);
-                // TODO: Open auction window
-                info!("Auctioneer option selected - would open auction window");
-            }
-            gossip_option::SPIRITHEALER => {
-                // Close gossip, handle spirit healer
-                self.send_gossip_complete(player_guid);
-                // TODO: Handle spirit healer resurrection
-                info!("Spirit healer option selected");
-            }
-            gossip_option::INNKEEPER => {
-                // Close gossip and ask the player to confirm the new home; the
-                // client answers with CMSG_BINDER_ACTIVATE.
-                self.send_gossip_complete(player_guid);
-                self.broadcast_mgr.send_msg_to_player(
-                    player_guid,
-                    oxcore_shared::messages::login::SmsgBinderConfirm { binder: npc_guid },
-                );
-            }
-            gossip_option::QUESTGIVER => {
-                // Handle quest interaction
-                self.send_gossip_complete(player_guid);
-                // TODO: Open quest dialog
-                info!("Quest giver option selected");
-            }
-            _ => {
-                // Unknown option, just close
-                warn!("Unknown gossip option type: {}", option.option_id);
-                self.send_gossip_complete(player_guid);
-            }
-        }
-
-        // Execute action script if defined
-        if option.action_script_id > 0 {
-            // TODO: Execute DB script
-            info!("Would execute script {}", option.action_script_id);
-        }
-
-        // Show point of interest if defined
-        if option.action_poi_id > 0 {
-            // TODO: Send SMSG_GOSSIP_POI
-            info!("Would show POI {}", option.action_poi_id);
-        }
-
-        Ok(())
+        source_guid: ObjectGuid,
+        list_index: u32,
+    ) -> Option<PreparedGossipOption> {
+        self.player_mgr
+            .with_player(player_guid, |p| {
+                (p.gossip.source == source_guid)
+                    .then(|| p.gossip.options.get(list_index as usize).cloned())
+                    .flatten()
+            })
+            .flatten()
     }
 
     /// Send gossip complete (close window)
     pub fn send_gossip_complete(&self, player_guid: ObjectGuid) {
         self.broadcast_mgr
             .send_msg_to_player(player_guid, SmsgGossipComplete);
-
-        // Clear the current gossip menu for this player
-        if let Some(mut player) = self.player_mgr.get_player_mut(player_guid) {
-            player.current_gossip_menu_id = None;
-        }
     }
 
-    /// Filter menu items based on conditions and NPC flags
-    fn filter_menu_items(
+    /// The greeting for `menu_id`: of the rows whose condition the player meets, the one
+    /// with the highest condition id; an unconditioned row only counts when no
+    /// conditioned row is met.
+    pub fn gossip_text_id(
         &self,
-        items: &[GossipMenuItem],
-        npc_flags: u32,
-        _player_guid: ObjectGuid,
-    ) -> Vec<GossipMenuItem> {
-        let mut filtered = Vec::new();
-
-        for item in items {
-            // Quests are delivered in the dedicated quest section of the gossip
-            // packet, never as a clickable gossip option. The generic menu-0
-            // fallback contains a QUESTGIVER placeholder row; skip it (matches
-            // PrepareGossipMenu setting hasMenuItem=false for GOSSIP_OPTION_QUESTGIVER).
-            if item.option_id == gossip_option::QUESTGIVER {
-                continue;
-            }
-
-            // Check NPC flag requirement
-            if item.npc_option_npcflag > 0 {
-                if (npc_flags & item.npc_option_npcflag) == 0 {
-                    continue; // NPC doesn't have required flags
-                }
-            }
-
-            // Check condition (if defined)
-            if item.condition_id > 0 {
-                // TODO: Check condition via ConditionSystem
-                // For now, assume condition passes
-                let condition_passes = true;
-                if !condition_passes {
-                    continue;
-                }
-            }
-
-            // TODO: Check class/race requirements for trainer options
-            // TODO: Check level requirements
-
-            filtered.push(item.clone());
+        world: &World,
+        player_guid: ObjectGuid,
+        source_guid: ObjectGuid,
+        menu_id: u32,
+    ) -> u32 {
+        if menu_id == 0 {
+            return DEFAULT_GOSSIP_MESSAGE;
         }
-
-        filtered
-    }
-
-    /// Get localized text for a menu option
-    pub fn get_option_text(&self, item: &GossipMenuItem, _locale: u8) -> String {
-        // First try broadcast text
-        if item.option_broadcast_text > 0 {
-            if let Some(text) = self
-                .manager
-                .get_localized_text(item.option_broadcast_text, false)
-            {
-                return text;
+        let mut text_id = DEFAULT_GOSSIP_MESSAGE;
+        let mut best_condition = 0;
+        for menu in self.manager.get_menus(menu_id) {
+            let fits = if menu.condition_id == 0 {
+                best_condition == 0
+            } else {
+                menu.condition_id > best_condition
+                    && self.condition_met(world, menu.condition_id, player_guid, source_guid)
+            };
+            if fits {
+                best_condition = menu.condition_id;
+                text_id = menu.text_id;
             }
         }
-
-        // Fall back to raw text
-        item.option_text.clone()
+        text_id
     }
 
-    /// Get NPC text for a menu
-    pub fn get_npc_text(&self, text_id: u32) -> Option<String> {
+    /// The greeting a creature spawn shows without a menu (`npc_gossip`).
+    fn source_text_id(&self, world: &World, source_guid: ObjectGuid) -> u32 {
+        if !source_guid.is_creature() {
+            return DEFAULT_GOSSIP_MESSAGE;
+        }
+        world
+            .managers
+            .creature_mgr
+            .with_creature(source_guid, |c| c.spawn_id)
+            .and_then(|spawn_id| self.manager.get_npc_gossip_text(spawn_id))
+            .unwrap_or(DEFAULT_GOSSIP_MESSAGE)
+    }
+
+    /// The first line of a creature's greeting, used as the heading of its quest list.
+    fn quest_list_greeting(
+        &self,
+        world: &World,
+        player_guid: ObjectGuid,
+        source_guid: ObjectGuid,
+    ) -> QuestListGreeting {
+        if !source_guid.is_creature_or_pet() {
+            return QuestListGreeting::default();
+        }
+        let menu_id = self.default_menu_id(world, source_guid);
+        let text_id = if menu_id != 0 {
+            self.gossip_text_id(world, player_guid, source_guid, menu_id)
+        } else {
+            self.source_text_id(world, source_guid)
+        };
         if text_id == DEFAULT_GOSSIP_MESSAGE {
-            return None;
+            return QuestListGreeting::default();
         }
+        let Some(broadcast) = self
+            .manager
+            .get_npc_text(text_id)
+            .map(|t| t.options[0].broadcast_text_id)
+            .filter(|&id| id != 0)
+            .and_then(|id| self.manager.get_broadcast_text(id))
+        else {
+            return QuestListGreeting::default();
+        };
+        let gender = creature_gender(world, source_guid);
+        QuestListGreeting {
+            text: broadcast_text_for(&broadcast, gender),
+            emote_delay: broadcast.emote_delays[0],
+            emote: broadcast.emote_ids[0],
+        }
+    }
 
-        let npc_text = self.manager.get_npc_text(text_id)?;
+    fn send_gossip_menu(
+        &self,
+        player_guid: ObjectGuid,
+        source_guid: ObjectGuid,
+        menu: &PlayerGossipMenu,
+        text_id: u32,
+    ) {
+        let options = menu
+            .options
+            .iter()
+            .enumerate()
+            .map(|(index, option)| GossipOptionData {
+                index: index as u32,
+                icon: option.icon,
+                coded: option.coded,
+                money: option.box_money,
+                text: option.text.clone(),
+            })
+            .collect();
+        let quests = menu
+            .quests
+            .iter()
+            .map(|q| oxcore_shared::messages::GossipQuestData {
+                quest_id: q.quest_id,
+                icon: q.icon,
+                level: q.level,
+                title: q.title.clone(),
+            })
+            .collect();
+        self.broadcast_mgr.send_msg_to_player(
+            player_guid,
+            SmsgGossipMessage {
+                source_guid,
+                menu_id: menu.menu_id,
+                text_id,
+                options,
+                quests,
+            },
+        );
+    }
 
-        // Select a text option based on probabilities
-        let mut selected_id = 0;
-        for option in npc_text.options.iter() {
-            if option.probability > 0.0 {
-                selected_id = option.broadcast_text_id;
-                break; // Simplified - always picks first valid
+    /// The source's quests as the player sees them in a menu.
+    fn quest_menu(
+        &self,
+        world: &World,
+        player_guid: ObjectGuid,
+        source_guid: ObjectGuid,
+    ) -> Vec<GossipQuestData> {
+        let quest = &world.systems.quest;
+        if source_guid.is_game_object() {
+            world
+                .managers
+                .gameobject_mgr
+                .with_gameobject(source_guid, |go| go.entry)
+                .map(|entry| quest.prepare_gameobject_quest_menu(player_guid, entry, world))
+                .unwrap_or_default()
+        } else {
+            self.creature_mgr
+                .with_creature(source_guid, |c| c.entry)
+                .map(|entry| quest.prepare_quest_menu(player_guid, entry, world))
+                .unwrap_or_default()
+        }
+    }
+
+    /// Whether a creature's service option applies to this player.
+    fn creature_option_shown(
+        &self,
+        world: &World,
+        item: &GossipMenuItem,
+        entry: u32,
+        viewer: &Viewer,
+        player_guid: ObjectGuid,
+    ) -> bool {
+        let template = self.creature_mgr.get_template(entry);
+        let trainer_kind = template.as_ref().map(|t| t.trainer_type);
+        let trainer = self.creature_mgr.trainer_requirements(entry);
+        match item.option_id {
+            gossip_option::GOSSIP | gossip_option::TAXIVENDOR => true,
+            // Quests have their own section of the window, and repairs come with the
+            // vendor window.
+            gossip_option::QUESTGIVER | gossip_option::ARMORER => false,
+            gossip_option::SPIRITHEALER => !viewer.alive,
+            gossip_option::VENDOR => {
+                let has_items = !world
+                    .systems
+                    .vendor_manager
+                    .get_vendor_items(entry)
+                    .is_empty();
+                if !has_items {
+                    warn!("Creature entry {} is a vendor with nothing to sell", entry);
+                }
+                has_items
+            }
+            gossip_option::TRAINER => trainer_kind
+                .is_some_and(|kind| self.is_trainer_of(world, entry, kind, viewer, player_guid)),
+            gossip_option::UNLEARNTALENTS => {
+                viewer.level >= 10
+                    && trainer_kind == Some(trainer_type::CLASS)
+                    && viewer.class == trainer.class
+            }
+            // Hunter pets do not keep a spell book yet, so there is nothing to untrain.
+            gossip_option::UNLEARNPETSKILLS => false,
+            gossip_option::BATTLEFIELD => world
+                .managers
+                .battleground_mgr
+                .battlemaster_bg(entry)
+                .is_some_and(|bg| {
+                    crate::game::battleground::system::has_level_access(world, player_guid, bg)
+                }),
+            gossip_option::STABLEPET => viewer.class == CLASS_HUNTER,
+            gossip_option::SPIRITGUIDE
+            | gossip_option::INNKEEPER
+            | gossip_option::BANKER
+            | gossip_option::PETITIONER
+            | gossip_option::TABARDDESIGNER
+            | gossip_option::AUCTIONEER => true,
+            other => {
+                warn!(
+                    "Creature entry {} has unknown gossip option {} in menu {}",
+                    entry, other, item.menu_id
+                );
+                false
             }
         }
+    }
 
-        if selected_id > 0 {
-            self.manager.get_localized_text(selected_id, false)
-        } else {
-            None
+    /// Whether the trainer teaches this player: class trainers their class, pet trainers
+    /// hunters, mount trainers their race (or anyone exalted with them), profession
+    /// trainers those who know the profession.
+    fn is_trainer_of(
+        &self,
+        world: &World,
+        entry: u32,
+        kind: u8,
+        viewer: &Viewer,
+        player_guid: ObjectGuid,
+    ) -> bool {
+        if world.systems.trainer_manager.get_trainer_spells(entry).is_empty() {
+            warn!("Creature entry {} is a trainer with nothing to teach", entry);
+            return false;
+        }
+        let requirements = self.creature_mgr.trainer_requirements(entry);
+        match kind {
+            trainer_type::CLASS => viewer.class == requirements.class,
+            trainer_type::PET => viewer.class == CLASS_HUNTER,
+            trainer_type::MOUNT => {
+                requirements.race == 0
+                    || viewer.race == requirements.race
+                    || self.exalted_with_creature(world, entry, player_guid)
+            }
+            trainer_type::TRADESKILL => {
+                requirements.spell == 0
+                    || self
+                        .player_mgr
+                        .with_player(player_guid, |p| p.spells.knows_spell(requirements.spell))
+                        .unwrap_or(false)
+            }
+            _ => false,
         }
     }
 
-    /// Get option details for a menu item
-    /// Returns the GossipMenuItem if found, None otherwise
-    pub fn get_option_details(&self, menu_id: u32, option_id: u32) -> Option<GossipMenuItem> {
-        let items = self.manager.get_menu_items(menu_id);
-        items.into_iter().find(|item| item.id == option_id)
+    fn exalted_with_creature(&self, world: &World, entry: u32, player_guid: ObjectGuid) -> bool {
+        let Some(faction_template) = self.creature_mgr.get_template(entry).map(|t| t.faction)
+        else {
+            return false;
+        };
+        let Some(faction) = world
+            .dbc
+            .read()
+            .get_faction_template(faction_template)
+            .map(|t| t.faction)
+        else {
+            return false;
+        };
+        world.systems.reputation.get_rank(player_guid, faction, world) == Some(ReputationRank::Exalted)
     }
 
-    /// Check if a creature has a gossip menu defined
-    /// Returns true if the creature has a non-default gossip menu
-    pub fn has_gossip_menu(&self, entry: u32) -> bool {
-        // Check if creature has a specific menu defined
-        if let Some(menu_id) = self.manager.get_creature_menu_id(entry) {
-            // Check if this menu has any items
-            let items = self.manager.get_menu_items(menu_id);
-            !items.is_empty()
-        } else {
-            false
+    fn condition_met(
+        &self,
+        world: &World,
+        condition_id: u32,
+        player_guid: ObjectGuid,
+        source_guid: ObjectGuid,
+    ) -> bool {
+        world.managers.condition_mgr.is_satisfied(
+            condition_id,
+            ConditionContext {
+                target: player_guid,
+                source: source_guid,
+            },
+            world,
+        )
+    }
+
+    /// The broadcast text in the player's gender when one is set, else the literal text.
+    fn text_or_broadcast(&self, literal: &str, broadcast_id: u32, gender: u8) -> String {
+        if broadcast_id != 0 {
+            if let Some(broadcast) = self.manager.get_broadcast_text(broadcast_id) {
+                return broadcast_text_for(&broadcast, gender);
+            }
         }
+        literal.to_string()
     }
 
     /// Initialize the gossip system
@@ -474,4 +751,24 @@ impl GossipSystem {
     pub async fn shutdown(&self) -> Result<()> {
         Ok(())
     }
+}
+
+/// The female text for women and the genderless when there is one, else the male text.
+fn broadcast_text_for(broadcast: &super::types::BroadcastText, gender: u8) -> String {
+    const GENDER_MALE: u8 = 0;
+    if gender != GENDER_MALE && !broadcast.female_text.is_empty() {
+        broadcast.female_text.clone()
+    } else {
+        broadcast.male_text.clone()
+    }
+}
+
+fn creature_gender(world: &World, guid: ObjectGuid) -> u8 {
+    world
+        .managers
+        .creature_mgr
+        .with_creature(guid, |c| c.display_id)
+        .and_then(|display| world.managers.creature_mgr.get_model_info(display))
+        .map(|info| info.gender)
+        .unwrap_or(0)
 }

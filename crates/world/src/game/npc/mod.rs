@@ -6,6 +6,7 @@
 //! - quest: Quest giving and completion
 
 pub mod gossip;
+pub mod interaction;
 pub mod quest;
 pub mod trainer;
 pub mod vendor;

@@ -51,6 +51,15 @@ fn checked_u8(value: i64, field: &str) -> Result<u8> {
     u8::try_from(value).with_context(|| format!("{field} must fit u8"))
 }
 
+/// `creature_template` trainer columns: the class a class or pet trainer teaches, the
+/// race a mount trainer serves, and the spell a profession trainer requires.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TrainerRequirements {
+    pub class: u8,
+    pub race: u8,
+    pub spell: u32,
+}
+
 /// Creature model info from creature_display_info_addon table
 /// Stores bounding_radius, combat_reach, and speed rates per display_id
 #[derive(Debug, Clone)]
@@ -304,6 +313,8 @@ pub struct CreatureManager {
     /// Where each template may move (`inhabit_type`), when not the usual
     /// ground-and-water.
     inhabit_types: DashMap<u32, u8>,
+    /// Who a trainer teaches, for templates that set any of it.
+    trainer_requirements: DashMap<u32, TrainerRequirements>,
     /// creature_spells lists by entry.
     spell_lists: DashMap<u32, Arc<Vec<crate::game::creature::ai::types::CreatureSpellsEntry>>>,
 }
@@ -326,6 +337,7 @@ impl CreatureManager {
             display_scales: DashMap::new(),
             raid_lock_entries: dashmap::DashSet::new(),
             inhabit_types: DashMap::new(),
+            trainer_requirements: DashMap::new(),
             spell_lists: DashMap::new(),
         }
     }
@@ -336,6 +348,14 @@ impl CreatureManager {
             .get(&entry)
             .map(|v| *v)
             .unwrap_or(INHABIT_GROUND_AND_WATER)
+    }
+
+    /// The class, race or spell a trainer requires of its students.
+    pub fn trainer_requirements(&self, entry: u32) -> TrainerRequirements {
+        self.trainer_requirements
+            .get(&entry)
+            .map(|v| *v)
+            .unwrap_or_default()
     }
 
     /// Whether killing this creature permanently saves its raid to the killers.
@@ -489,6 +509,14 @@ impl CreatureManager {
             let static_flags2 = checked_u32(row.static_flags2, "creature_template.static_flags2")?;
             if static_flags2 & CREATURE_STATIC_FLAG_2_LOCK_TAPPERS_TO_RAID_ON_DEATH != 0 {
                 self.raid_lock_entries.insert(entry);
+            }
+            let trainer = TrainerRequirements {
+                class: checked_u8(row.trainer_class, "creature_template.trainer_class")?,
+                race: checked_u8(row.trainer_race, "creature_template.trainer_race")?,
+                spell: checked_u32(row.trainer_spell, "creature_template.trainer_spell")?,
+            };
+            if trainer != TrainerRequirements::default() {
+                self.trainer_requirements.insert(entry, trainer);
             }
             let inhabit = checked_u8(row.inhabit_type, "creature_template.inhabit_type")?;
             if inhabit != INHABIT_GROUND_AND_WATER {

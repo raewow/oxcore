@@ -40,6 +40,9 @@ pub struct CreatureTemplateRow {
     pub vendor_id: i64,     // Maps to npc_vendor_template.entry for shared vendor item lists
     pub trainer_id: i64,    // Maps to npc_trainer_template.entry for shared trainer spell lists
     pub trainer_type: i64,  // 0=class, 1=mount, 2=tradeskill, 3=pet
+    pub trainer_spell: i64,
+    pub trainer_class: i64,
+    pub trainer_race: i64,
     pub rank: i64,
     pub spell_id1: i64,
     pub spell_id2: i64,

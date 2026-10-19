@@ -140,6 +140,15 @@ pub struct GameObjectTemplate {
 }
 
 impl GameObjectTemplate {
+    /// The gossip menu a quest giver (data[3]) or goober (data[19]) opens with.
+    pub fn gossip_menu_id(&self) -> u32 {
+        match GameObjectType::from(self.go_type) {
+            GameObjectType::QuestGiver => self.data[3].max(0) as u32,
+            GameObjectType::Goober => self.data[19].max(0) as u32,
+            _ => 0,
+        }
+    }
+
     /// Get the auto-close time for doors/buttons (data[1] in milliseconds)
     pub fn auto_close_time(&self) -> u32 {
         match GameObjectType::from(self.go_type) {

@@ -160,8 +160,8 @@ pub struct Player {
     pub environment: EnvironmentState,
     /// Target currently being looted
     pub looting_target: Option<ObjectGuid>,
-    /// Current gossip menu ID (for tracking gossip state)
-    pub current_gossip_menu_id: Option<u32>,
+    /// The gossip menu the player was last shown.
+    pub gossip: crate::game::npc::gossip::PlayerGossipMenu,
     /// Banker currently authorized for open bank operations.
     pub current_banker_guid: Option<ObjectGuid>,
     /// Currently selected unit/object (for targeting, gossip, vendors)
@@ -298,7 +298,7 @@ impl Player {
             ammo_id: 0,
             environment: EnvironmentState::default(),
             looting_target: None,
-            current_gossip_menu_id: None,
+            gossip: Default::default(),
             current_banker_guid: None,
             selection: None,
             auction_access_mode: 0,

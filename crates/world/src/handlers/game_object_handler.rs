@@ -57,16 +57,6 @@ pub async fn handle_gameobj_use(
         return Ok(());
     }
 
-    let template = world.managers.gameobject_mgr.get_template(go_entry);
-    let gossip_id = template
-        .as_ref()
-        .map(|template| match go_type {
-            GameObjectType::QuestGiver => template.data[3].max(0) as u32,
-            GameObjectType::Goober if template.data[7] <= 0 => template.data[19].max(0) as u32,
-            _ => 0,
-        })
-        .unwrap_or(0);
-
     if go_type == GameObjectType::Chest {
         world
             .systems
@@ -76,7 +66,18 @@ pub async fn handle_gameobj_use(
         return Ok(());
     }
 
-    if !matches!(go_type, GameObjectType::QuestGiver | GameObjectType::Goober) {
+    // Quest givers always open their menu; goobers only when they have a menu and no
+    // page of text to show instead.
+    let opens_menu = match go_type {
+        GameObjectType::QuestGiver => true,
+        GameObjectType::Goober => world
+            .managers
+            .gameobject_mgr
+            .get_template(go_entry)
+            .is_some_and(|t| t.data[7] <= 0 && t.gossip_menu_id() != 0),
+        _ => false,
+    };
+    if !opens_menu {
         return Ok(());
     }
 
@@ -93,44 +94,11 @@ pub async fn handle_gameobj_use(
         }
     }
 
-    let quest_items =
-        world
-            .systems
-            .quest
-            .prepare_gameobject_quest_menu(player_guid, go_entry, world);
-
-    if gossip_id == 0 && !quest_items.is_empty() {
-        world
-            .systems
-            .quest
-            .send_gameobject_quest_list(player_guid, go_guid, go_entry, world)?;
-        return Ok(());
-    }
-
-    if gossip_id > 0 || !quest_items.is_empty() {
-        let quest_data = if quest_items.is_empty() {
-            None
-        } else {
-            Some(
-                quest_items
-                    .into_iter()
-                    .map(|q| oxcore_shared::messages::GossipQuestData {
-                        quest_id: q.quest_id,
-                        icon: q.icon,
-                        level: q.level,
-                        title: q.title,
-                    })
-                    .collect(),
-            )
-        };
-        world
-            .systems
-            .gossip
-            .send_gameobject_gossip_menu(player_guid, go_guid, gossip_id, quest_data)
-            .await?;
-    }
-
-    Ok(())
+    world
+        .systems
+        .gossip
+        .gossip_hello(world, player_guid, go_guid)
+        .await
 }
 
 /// Handle game object open/loot interaction.
@@ -341,6 +309,15 @@ mod tests {
         let mut data = [0; 24];
         data[3] = 7;
         let go_guid = add_gameobject(&world, 200, GameObjectType::QuestGiver as u32, data);
+        world
+            .systems
+            .gossip_manager
+            .add_menu(crate::game::npc::gossip::GossipMenu {
+                entry: 7,
+                text_id: 100,
+                script_id: 0,
+                condition_id: 0,
+            });
 
         let mut packet = WorldPacket::new(Opcode::CMSG_GAMEOBJ_USE);
         packet.write_guid(go_guid);
@@ -360,6 +337,7 @@ mod tests {
         let (session, mut rx) = add_player(&mut world);
         let go_guid = add_gameobject(&world, 201, GameObjectType::QuestGiver as u32, [0; 24]);
         add_quest(&world, 1, 201);
+        add_quest(&world, 2, 201);
 
         let mut packet = WorldPacket::new(Opcode::CMSG_GAMEOBJ_USE);
         packet.write_guid(go_guid);
@@ -369,5 +347,23 @@ mod tests {
 
         let out = read_packet(&mut rx);
         assert_eq!(out.opcode(), Opcode::SMSG_QUESTGIVER_QUEST_LIST);
+    }
+
+    #[tokio::test]
+    async fn gameobject_with_one_quest_opens_its_details() {
+        let mut world = test_world();
+        install_mock_quest_system(&mut world);
+        let (session, mut rx) = add_player(&mut world);
+        let go_guid = add_gameobject(&world, 202, GameObjectType::QuestGiver as u32, [0; 24]);
+        add_quest(&world, 3, 202);
+
+        let mut packet = WorldPacket::new(Opcode::CMSG_GAMEOBJ_USE);
+        packet.write_guid(go_guid);
+        handle_gameobj_use(&session, &mut packet, &world)
+            .await
+            .expect("handler should succeed");
+
+        let out = read_packet(&mut rx);
+        assert_eq!(out.opcode(), Opcode::SMSG_QUESTGIVER_QUEST_DETAILS);
     }
 }

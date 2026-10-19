@@ -293,37 +293,31 @@ pub async fn handle_questgiver_hello(
         player_guid, quest_giver_guid
     );
 
-    // Resolve creature questgiver with interaction validation.
-    // Must exist, be alive, and have NPC interaction flags (gossip or quest giver).
-    let (entry, npc_flags, creature_type) = {
-        let Some(creature) = world.managers.creature_mgr.get_creature(quest_giver_guid) else {
-            debug!(
-                "Questgiver hello for unresolved or non-creature guid {:?}",
-                quest_giver_guid
-            );
-            return Ok(());
-        };
-
-        if !creature.is_alive() {
-            debug!("Questgiver {:?} is dead, rejecting hello", quest_giver_guid);
-            return Ok(());
-        }
-
-        let npc_flags = creature.npc_flags;
-
-        // Must have at least one NPC interaction flag to open quest/gossip
-        if !is_npc(npc_flags) {
-            debug!(
-                "Questgiver {:?} has no interaction flags (0x{:08X}), rejecting hello",
-                quest_giver_guid, npc_flags
-            );
-            return Ok(());
-        }
-
-        (creature.entry, npc_flags, creature.creature_type)
+    if !crate::game::npc::interaction::can_interact_with_npc(world, player_guid, quest_giver_guid, 0)
+    {
+        debug!(
+            "Player {:?} cannot interact with quest giver {:?}",
+            player_guid, quest_giver_guid
+        );
+        return Ok(());
+    }
+    let Some((entry, npc_flags)) = world
+        .managers
+        .creature_mgr
+        .with_creature(quest_giver_guid, |c| (c.entry, c.npc_flags))
+    else {
+        return Ok(());
     };
+    // Must have at least one NPC interaction flag to open quest/gossip
+    if !is_npc(npc_flags) {
+        debug!(
+            "Questgiver {:?} has no interaction flags (0x{:08X}), rejecting hello",
+            quest_giver_guid, npc_flags
+        );
+        return Ok(());
+    }
 
-    // Feign death cleanup (matches auction handler pattern)
+    // Talking to a quest giver ends feign death.
     world
         .managers
         .player_mgr
@@ -340,59 +334,8 @@ pub async fn handle_questgiver_hello(
             }
         });
 
-    // Movement pause for non-civilian, non-totem creatures
-    {
-        const CREATURE_FLAG_EXTRA_CIVILIAN: u32 = 0x00000002;
-        const CREATURE_TYPE_TOTEM: u8 = 11;
-
-        let is_civilian = world
-            .managers
-            .creature_mgr
-            .get_template(entry)
-            .map(|t| (t.flags_extra & CREATURE_FLAG_EXTRA_CIVILIAN) != 0)
-            .unwrap_or(false);
-        let is_totem = creature_type == CREATURE_TYPE_TOTEM;
-
-        if !is_civilian && !is_totem {
-            world
-                .managers
-                .creature_mgr
-                .with_creature_mut(quest_giver_guid, |c| {
-                    c.pause_out_of_combat_movement();
-                });
-        }
-    }
-
-    // --- Interacting spells/auras cleanup ---
-    const INTERACT_INTERRUPT_FLAGS: u32 = 0x00000C00; // TALK (0x400) | USE (0x800)
-
-    world
-        .systems
-        .auras
-        .remove_auras_with_interrupt_flag(player_guid, INTERACT_INTERRUPT_FLAGS, world)
+    crate::handlers::gossip_handler::begin_npc_interaction(world, player_guid, quest_giver_guid)
         .await?;
-
-    {
-        let should_interrupt_channel = world
-            .systems
-            .player
-            .manager()
-            .with_player(player_guid, |player| {
-                player
-                    .spells
-                    .get_current_spell(CurrentSpellType::Channeled)
-                    .and_then(|cast| {
-                        world.managers.spell_mgr.get(cast.spell_id).filter(|entry| {
-                            (entry.channel_interrupt_flags & INTERACT_INTERRUPT_FLAGS) != 0
-                        })
-                    })
-                    .is_some()
-            })
-            .unwrap_or(false);
-        if should_interrupt_channel {
-            world.systems.spells.cancel_cast(player_guid, world).await?;
-        }
-    }
 
     // Lua OnGossipHello first chance
     if let Some(script) = world.managers.lua_mgr.get_gossip_script(entry) {
@@ -407,77 +350,11 @@ pub async fn handle_questgiver_hello(
         }
     }
 
-    // Build the quest list this NPC offers/accepts for the player.
-    let quest_list = if (npc_flags & NPC_FLAG_QUEST_GIVER) != 0 {
-        world
-            .systems
-            .quest
-            .prepare_quest_menu(player_guid, entry, world)
-    } else {
-        Vec::new()
-    };
-
-    // SendPreparedGossip: an NPC without a usable gossip menu that has quests
-    // (and is not a vendor) opens the quest interface directly.
-    let has_gossip_flag = (npc_flags & NPC_FLAG_GOSSIP) != 0;
-    let has_vendor_flag = (npc_flags & NPC_FLAG_VENDOR) != 0;
-    let has_gossip_menu = world.systems.gossip.has_gossip_menu(entry);
-
-    if (!has_gossip_flag || !has_gossip_menu) && !has_vendor_flag && !quest_list.is_empty() {
-        if quest_list.len() == 1 {
-            let quest_id = quest_list[0].quest_id;
-            match world.systems.quest.get_quest_status(player_guid, quest_id) {
-                QuestStatus::Complete | QuestStatus::Incomplete => {
-                    world
-                        .systems
-                        .quest
-                        .handle_quest_complete(player_guid, quest_giver_guid, quest_id, world)
-                        .await?;
-                }
-                _ => {
-                    world.systems.quest.send_quest_details(
-                        player_guid,
-                        quest_giver_guid,
-                        quest_id,
-                        world,
-                    )?;
-                }
-            }
-        } else {
-            world.systems.quest.send_quest_giver_quest_list(
-                player_guid,
-                quest_giver_guid,
-                entry,
-                world,
-            )?;
-        }
-        return Ok(());
-    }
-
-    // Otherwise show the gossip menu (any quests are folded into its quest section).
-    let quest_data = if quest_list.is_empty() {
-        None
-    } else {
-        Some(
-            quest_list
-                .into_iter()
-                .map(|q| oxcore_shared::messages::GossipQuestData {
-                    quest_id: q.quest_id,
-                    icon: q.icon,
-                    level: q.level,
-                    title: q.title,
-                })
-                .collect(),
-        )
-    };
-
     world
         .systems
         .gossip
-        .send_gossip_menu(player_guid, quest_giver_guid, None, quest_data)
-        .await?;
-
-    Ok(())
+        .gossip_hello(world, player_guid, quest_giver_guid)
+        .await
 }
 
 /// Handle CMSG_QUESTGIVER_QUERY_QUEST (0x186)

@@ -8,15 +8,13 @@ use tracing::{debug, info, warn};
 use crate::core::common::packet::WorldPacketGuidExt;
 use crate::core::lua::{build_player_snapshot, execute_gossip_actions};
 use crate::core::session::WorldSession;
-use crate::game::common::creature_flags::CREATURE_STATIC_FLAG_VISIBLE_TO_GHOSTS;
+use crate::game::npc::interaction::{can_interact_with_gameobject, can_interact_with_npc};
 use crate::game::player::spells::state::CurrentSpellType;
 use crate::World;
 use oxcore_shared::protocol::bitbuf::BitReader;
 use oxcore_shared::protocol::{ObjectGuid, Opcode, Protocol, WorldPacket};
 
 const NPC_FLAG_BANKER: u32 = 0x00000100;
-const INTERACTION_DISTANCE: f32 = 5.0;
-const UNIT_FLAG_NOT_SELECTABLE: u32 = 0x02000000;
 
 fn read_gossip_hello_guid(protocol: Protocol, packet: &mut WorldPacket) -> Result<ObjectGuid> {
     packet
@@ -48,7 +46,7 @@ fn read_npc_text_query(protocol: Protocol, packet: &mut WorldPacket) -> Result<u
 fn read_gossip_select_option(
     protocol: Protocol,
     packet: &mut WorldPacket,
-) -> Result<(ObjectGuid, u32)> {
+) -> Result<(ObjectGuid, u32, String)> {
     if protocol == Protocol::Modern {
         let mut reader = BitReader::new(packet.contents());
         let (high, low) = reader
@@ -64,10 +62,10 @@ fn read_gossip_select_option(
             .read_bits(8)
             .ok_or_else(|| anyhow::anyhow!("Failed to read promotion code length"))?
             as usize;
-        reader
+        let code = reader
             .read_string(code_length)
             .ok_or_else(|| anyhow::anyhow!("Failed to read promotion code"))?;
-        Ok((ObjectGuid::from_guid128(high, low), option_id))
+        Ok((ObjectGuid::from_guid128(high, low), option_id, code))
     } else {
         let npc_guid = packet
             .read_guid()
@@ -75,119 +73,19 @@ fn read_gossip_select_option(
         let option_id = packet
             .read_u32()
             .ok_or_else(|| anyhow::anyhow!("Failed to read option ID"))?;
-        let _coded_text = packet.read_cstring();
-        Ok((npc_guid, option_id))
+        let code = packet.read_cstring().unwrap_or_default();
+        Ok((npc_guid, option_id, code))
     }
 }
 
-/// Handle CMSG_GOSSIP_HELLO (0x17B)
-///
-/// Sent when player right-clicks an NPC to open gossip.
-/// Packet format: GUID (packed)
-pub async fn handle_gossip_hello(
-    session: &WorldSession,
-    packet: &mut WorldPacket,
+/// Talking to an NPC or using a menu: breaks interact-cancelled auras and channels, and
+/// stops a wandering creature so the player can talk to it.
+pub(crate) async fn begin_npc_interaction(
     world: &World,
+    player_guid: ObjectGuid,
+    source_guid: ObjectGuid,
 ) -> Result<()> {
-    let player_guid = session
-        .player_guid()
-        .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
-
-    let npc_guid = read_gossip_hello_guid(session.protocol(), packet)?;
-
-    info!(
-        "CMSG_GOSSIP_HELLO: player={:?}, npc={:?}",
-        player_guid, npc_guid
-    );
-
-    // Get creature info to check if it's a quest giver
-    let (entry, npc_flags, creature_type) = {
-        let Some(creature) = world.managers.creature_mgr.get_creature(npc_guid) else {
-            debug!(
-                "Gossip hello for unresolved or non-creature guid {:?}",
-                npc_guid
-            );
-            return Ok(());
-        };
-
-        if !creature.is_alive() {
-            debug!("Gossip hello for dead creature {:?}", npc_guid);
-            return Ok(());
-        }
-
-        let can_interact = world
-            .managers
-            .player_mgr
-            .with_player(player_guid, |player| {
-                if player.map_id != creature.map_id {
-                    return false;
-                }
-
-                if player.is_alive()
-                    && (creature.static_flags1 & CREATURE_STATIC_FLAG_VISIBLE_TO_GHOSTS) != 0
-                {
-                    return false;
-                }
-
-                if !player.is_alive()
-                    && (creature.static_flags1 & CREATURE_STATIC_FLAG_VISIBLE_TO_GHOSTS) == 0
-                {
-                    return false;
-                }
-
-                if crate::game::faction::creature_is_hostile_to_player(
-                    &world.dbc.read(),
-                    creature.faction,
-                    player,
-                ) {
-                    return false;
-                }
-
-                if creature.unit_flags & UNIT_FLAG_NOT_SELECTABLE != 0 {
-                    return false;
-                }
-
-                player
-                    .movement
-                    .position
-                    .is_within_range(&creature.position, INTERACTION_DISTANCE)
-            })
-            .unwrap_or(false);
-
-        if !can_interact || world.managers.creature_mgr.is_in_combat(npc_guid) {
-            debug!(
-                "Player {:?} cannot interact with {:?}",
-                player_guid, npc_guid
-            );
-            return Ok(());
-        }
-
-        (creature.entry, creature.npc_flags, creature.creature_type)
-    };
-
-    {
-        const CREATURE_FLAG_EXTRA_CIVILIAN: u32 = 0x00000002;
-        const CREATURE_TYPE_TOTEM: u8 = 11;
-
-        let is_civilian = world
-            .managers
-            .creature_mgr
-            .get_template(entry)
-            .map(|t| (t.flags_extra & CREATURE_FLAG_EXTRA_CIVILIAN) != 0)
-            .unwrap_or(false);
-        let is_totem = creature_type == CREATURE_TYPE_TOTEM;
-
-        if !is_civilian && !is_totem {
-            world
-                .managers
-                .creature_mgr
-                .with_creature_mut(npc_guid, |c| {
-                    c.pause_out_of_combat_movement();
-                });
-        }
-    }
-
-    const INTERACT_INTERRUPT_FLAGS: u32 = 0x00000C00;
+    const INTERACT_INTERRUPT_FLAGS: u32 = 0x0000_0C00; // TALK (0x400) | USE (0x800)
 
     world
         .systems
@@ -215,56 +113,76 @@ pub async fn handle_gossip_hello(
         world.systems.spells.cancel_cast(player_guid, world).await?;
     }
 
-    info!(
-        "NPC entry={}, npc_flags=0x{:08X}, has_gossip={}, has_quest={}, has_vendor={}",
-        entry,
-        npc_flags,
-        (npc_flags & 0x00000001) != 0,
-        (npc_flags & 0x00000002) != 0,
-        (npc_flags & 0x00000080) != 0
-    );
+    if source_guid.is_creature_or_pet() {
+        const CREATURE_FLAG_EXTRA_CIVILIAN: u32 = 0x0000_0002;
+        const CREATURE_TYPE_TOTEM: u8 = 11;
 
-    // Spirit guides in a battleground: wait for the next resurrection wave.
-    const NPC_FLAG_SPIRITGUIDE: u32 = 0x00000040;
-    if (npc_flags & NPC_FLAG_SPIRITGUIDE) != 0 {
-        if let Some(time_left_ms) =
-            crate::game::battleground::system::spirit_healer_time(world, player_guid)
-        {
-            session.send_msg(oxcore_shared::messages::death::SmsgAreaSpiritHealerTime {
-                healer_guid: npc_guid,
-                time_left_ms,
-            })?;
-            crate::game::battleground::system::queue_for_wave(world, player_guid).await;
+        let Some((entry, creature_type)) = world
+            .managers
+            .creature_mgr
+            .with_creature(source_guid, |c| (c.entry, c.creature_type))
+        else {
             return Ok(());
+        };
+        let is_civilian = world
+            .managers
+            .creature_mgr
+            .get_template(entry)
+            .is_some_and(|t| (t.flags_extra & CREATURE_FLAG_EXTRA_CIVILIAN) != 0);
+        if !is_civilian && creature_type != CREATURE_TYPE_TOTEM {
+            world
+                .managers
+                .creature_mgr
+                .with_creature_mut(source_guid, |c| c.pause_out_of_combat_movement());
         }
     }
+    Ok(())
+}
 
+/// Handle CMSG_GOSSIP_HELLO (0x17B)
+///
+/// Sent when player right-clicks an NPC to open gossip.
+/// Packet format: GUID (packed)
+pub async fn handle_gossip_hello(
+    session: &WorldSession,
+    packet: &mut WorldPacket,
+    world: &World,
+) -> Result<()> {
+    let player_guid = session
+        .player_guid()
+        .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
 
-    // Spirit healer: NPC_FLAG_SPIRITHEALER = 0x20. When a dead ghost player
-    // clicks a spirit healer, skip gossip and send SMSG_SPIRIT_HEALER_CONFIRM
-    // directly. The client then shows the "Do you wish to be resurrected?" dialog
-    // and responds with CMSG_SPIRIT_HEALER_ACTIVATE on confirmation.
-    const NPC_FLAG_SPIRITHEALER: u32 = 0x00000020;
-    if (npc_flags & NPC_FLAG_SPIRITHEALER) != 0 {
-        let is_ghost = world
-            .managers
-            .player_mgr
-            .with_player(player_guid, |player| {
-                use crate::game::player::death::DeathState;
-                player.death.death_state == DeathState::Dead
-            })
-            .unwrap_or(false);
+    let npc_guid = read_gossip_hello_guid(session.protocol(), packet)?;
 
-        if is_ghost {
-            info!(
-                "Spirit healer interaction: player {:?} (ghost) -> NPC {:?}, sending SMSG_SPIRIT_HEALER_CONFIRM",
-                player_guid, npc_guid
-            );
-            session.send_msg(oxcore_shared::messages::death::SmsgSpiritHealerConfirm {
-                healer_guid: npc_guid,
-            })?;
-            return Ok(());
-        }
+    debug!(
+        "CMSG_GOSSIP_HELLO: player={:?}, npc={:?}",
+        player_guid, npc_guid
+    );
+
+    if !can_interact_with_npc(world, player_guid, npc_guid, 0) {
+        debug!(
+            "Player {:?} cannot interact with {:?}",
+            player_guid, npc_guid
+        );
+        return Ok(());
+    }
+    let Some((entry, npc_flags)) = world
+        .managers
+        .creature_mgr
+        .with_creature(npc_guid, |c| (c.entry, c.npc_flags))
+    else {
+        return Ok(());
+    };
+
+    begin_npc_interaction(world, player_guid, npc_guid).await?;
+
+    // Spirit guides send the battleground resurrection-wave timer when greeted.
+    const NPC_FLAG_SPIRITGUIDE: u32 = 0x00000040;
+    if (npc_flags & NPC_FLAG_SPIRITGUIDE) != 0 {
+        session.send_msg(oxcore_shared::messages::death::SmsgAreaSpiritHealerTime {
+            healer_guid: npc_guid,
+            time_left_ms: 0,
+        })?;
     }
 
     // Check for a Lua gossip script that handles OnGossipHello
@@ -280,157 +198,17 @@ pub async fn handle_gossip_hello(
         }
     }
 
-    // Prepare quest data if NPC is a quest giver
-    let quest_data = if (npc_flags & 0x00000002) != 0 {
-        // QUESTGIVER flag
-        info!("NPC has QUESTGIVER flag, preparing quest menu");
-        let quests = world
-            .systems
-            .quest
-            .prepare_quest_menu(player_guid, entry, world);
-        info!("Prepared {} quests for menu", quests.len());
-        for quest in &quests {
-            info!(
-                "  Quest {}: '{}' (icon={}, level={})",
-                quest.quest_id, quest.title, quest.icon, quest.level
-            );
-        }
-        Some(quests)
-    } else {
-        info!("NPC does not have QUESTGIVER flag");
-        None
-    };
-
-    // Check if we should auto-display a single quest.
-    // Conditions: Has exactly 1 quest, is not a vendor, and has no usable gossip menu.
-    let has_gossip_flag = (npc_flags & 0x00000001) != 0;
-    let has_vendor_flag = (npc_flags & 0x00000080) != 0;
-    let has_gossip_menu = world.systems.gossip.has_gossip_menu(entry);
-    let quest_count = quest_data.as_ref().map(|q| q.len()).unwrap_or(0);
-
-    // Determine if we should auto-display the quest
-    let should_auto_display =
-        quest_count == 1 && !has_vendor_flag && (!has_gossip_flag || !has_gossip_menu);
-
-    if should_auto_display {
-        // Auto-display the single quest directly
-        if let Some(ref quests) = quest_data {
-            if let Some(quest) = quests.first() {
-                let quest_id = quest.quest_id;
-                info!(
-                    "Auto-displaying single quest {} for player {:?} from NPC {:?}",
-                    quest_id, player_guid, npc_guid
-                );
-
-                // Check quest status to determine which dialog to show
-                use crate::game::npc::quest::types::QuestStatus;
-                let quest_status = world.systems.quest.get_quest_status(player_guid, quest_id);
-
-                match quest_status {
-                    QuestStatus::Complete => {
-                        // Quest is complete - show reward dialog
-                        info!(
-                            "Quest {} is complete for player {:?}, showing reward dialog",
-                            quest_id, player_guid
-                        );
-                        world
-                            .systems
-                            .quest
-                            .handle_quest_complete(player_guid, npc_guid, quest_id, world)
-                            .await?;
-                    }
-                    QuestStatus::Incomplete => {
-                        // Quest is incomplete - show request items/objectives dialog
-                        info!(
-                            "Quest {} is incomplete for player {:?}",
-                            quest_id, player_guid
-                        );
-                        world
-                            .systems
-                            .quest
-                            .handle_quest_complete(player_guid, npc_guid, quest_id, world)
-                            .await?;
-                    }
-                    _ => {
-                        // Quest is available or none - show quest details for accepting
-                        info!(
-                            "Quest {} is available for player {:?}, showing details dialog",
-                            quest_id, player_guid
-                        );
-                        world.systems.quest.send_quest_details(
-                            player_guid,
-                            npc_guid,
-                            quest_id,
-                            world,
-                        )?;
-                    }
-                }
-                return Ok(());
-            }
-        }
-    }
-
-    // Check if vendor should open directly (no gossip menu)
-    // Conditions: NPC is a vendor, has no GOSSIP flag, and has no gossip menu defined
-    if has_vendor_flag && !has_gossip_flag {
-        // Check if vendor has a gossip menu defined
-        if !has_gossip_menu {
-            // Open vendor window directly
-            info!(
-                "Opening vendor window directly for player {:?} from NPC {:?} (no gossip menu)",
-                player_guid, npc_guid
-            );
-            world
-                .systems
-                .vendor
-                .send_vendor_list(player_guid, npc_guid)
-                .await?;
-            return Ok(());
-        }
-    }
-
-    // Check if trainer should open directly (no gossip menu)
-    let has_trainer_flag = (npc_flags & 0x00000010) != 0; // NPC_FLAG_TRAINER
-    if has_trainer_flag && !has_gossip_flag {
-        let has_gossip_menu = world.systems.gossip.has_gossip_menu(entry);
-        if !has_gossip_menu {
-            info!(
-                "Opening trainer window directly for player {:?} from NPC {:?} (no gossip menu)",
-                player_guid, npc_guid
-            );
-            crate::handlers::trainer_handler::send_trainer_list(player_guid, npc_guid, world)
-                .await?;
-            return Ok(());
-        }
-    }
-
-    // Convert quest data to gossip format
-    let gossip_quests = quest_data.map(|quests| {
-        quests
-            .into_iter()
-            .map(|q| oxcore_shared::messages::GossipQuestData {
-                quest_id: q.quest_id,
-                icon: q.icon,
-                level: q.level,
-                title: q.title,
-            })
-            .collect()
-    });
-
-    // Delegate to gossip system
     world
         .systems
         .gossip
-        .send_gossip_menu(player_guid, npc_guid, None, gossip_quests)
-        .await?;
-
-    Ok(())
+        .gossip_hello(world, player_guid, npc_guid)
+        .await
 }
 
 /// Handle CMSG_GOSSIP_SELECT_OPTION (0x17C)
 ///
 /// Sent when player selects a gossip option.
-/// Packet format: GUID (packed), option_id (u32), [code (cstring)]
+/// Packet format: GUID (packed), option index (u32), [code (cstring)]
 pub async fn handle_gossip_select_option(
     session: &WorldSession,
     packet: &mut WorldPacket,
@@ -441,98 +219,73 @@ pub async fn handle_gossip_select_option(
         .ok_or_else(|| anyhow::anyhow!("Not logged in"))?;
 
     // Modern body adds GossipID and bit-length-prefixes the promotion code.
-    let (npc_guid, option_id) = read_gossip_select_option(session.protocol(), packet)?;
+    let (source_guid, list_index, code) = read_gossip_select_option(session.protocol(), packet)?;
 
     debug!(
-        "CMSG_GOSSIP_SELECT_OPTION: player={:?}, npc={:?}, option={}",
-        player_guid, npc_guid, option_id
+        "CMSG_GOSSIP_SELECT_OPTION: player={:?}, source={:?}, option={}",
+        player_guid, source_guid, list_index
     );
+
+    let Some(option) = world
+        .systems
+        .gossip
+        .shown_option(player_guid, source_guid, list_index)
+    else {
+        debug!(
+            "Gossip option {} was never offered to {:?} by {:?}",
+            list_index, player_guid, source_guid
+        );
+        return Ok(());
+    };
+    // A coded option needs the code the player typed.
+    if option.coded && code.is_empty() {
+        return Ok(());
+    }
+
+    let can_interact = if source_guid.is_game_object() {
+        can_interact_with_gameobject(world, player_guid, source_guid)
+    } else {
+        can_interact_with_npc(world, player_guid, source_guid, 0)
+    };
+    if !can_interact {
+        debug!(
+            "Player {:?} cannot interact with {:?}",
+            player_guid, source_guid
+        );
+        return Ok(());
+    }
+
+    begin_npc_interaction(world, player_guid, source_guid).await?;
 
     // Check for a Lua gossip script that handles OnGossipSelect
     let npc_entry = world
         .managers
         .creature_mgr
-        .get_creature(npc_guid)
-        .map(|c| c.entry)
+        .with_creature(source_guid, |c| c.entry)
         .unwrap_or(0);
     if npc_entry > 0 {
         if let Some(script) = world.managers.lua_mgr.get_gossip_script(npc_entry) {
-            // Get the current menu_id to pass to the script
             let menu_id = world
                 .managers
                 .player_mgr
-                .get_player(player_guid)
-                .and_then(|p| p.current_gossip_menu_id)
+                .with_player(player_guid, |p| p.gossip.menu_id)
                 .unwrap_or(0);
             let player_snap = build_player_snapshot(player_guid, world);
             let actions = world.managers.lua_mgr.with_lua(|lua| {
-                script.on_gossip_select(lua, &player_snap, npc_guid, menu_id, option_id)
+                script.on_gossip_select(lua, &player_snap, source_guid, menu_id, list_index)
             });
             if !actions.is_empty() {
-                execute_gossip_actions(actions, player_guid, npc_guid, world).await?;
+                execute_gossip_actions(actions, player_guid, source_guid, world).await?;
                 return Ok(());
             }
         }
     }
 
-    // Get the current menu_id for this player from the player state
-    // TODO: Track current gossip menu per player
-    let menu_id = world
-        .managers
-        .player_mgr
-        .get_player(player_guid)
-        .and_then(|p| p.current_gossip_menu_id)
-        .unwrap_or(0);
-
-    // Get the selected option details before handling
-    let option_details = world.systems.gossip.get_option_details(menu_id, option_id);
-
-    // Delegate to gossip system
     world
         .systems
         .gossip
-        .handle_option_select(player_guid, npc_guid, menu_id, option_id)
-        .await?;
-
-    // Handle special cases after gossip system closes the window
-    if let Some(option) = option_details {
-        use crate::game::npc::gossip::types::gossip_option;
-        match option.option_id {
-            gossip_option::VENDOR | gossip_option::ARMORER => {
-                // Open vendor window
-                info!(
-                    "Opening vendor window for player {:?} from NPC {:?}",
-                    player_guid, npc_guid
-                );
-                world
-                    .systems
-                    .vendor
-                    .send_vendor_list(player_guid, npc_guid)
-                    .await?;
-            }
-            gossip_option::TRAINER => {
-                // Open trainer window
-                info!(
-                    "Opening trainer window for player {:?} from NPC {:?}",
-                    player_guid, npc_guid
-                );
-                crate::handlers::trainer_handler::send_trainer_list(player_guid, npc_guid, world)
-                    .await?;
-            }
-            gossip_option::TAXIVENDOR => {
-                // Learn this flight point, or open the flight map.
-                crate::game::taxi::flight::talk_to_flight_master(world, player_guid, npc_guid);
-            }
-            gossip_option::BATTLEFIELD => {
-                crate::game::battleground::system::battlemaster_hello(world, player_guid, npc_guid);
-            }
-            _ => {
-                // Other options are handled by the gossip system
-            }
-        }
-    }
-
-    Ok(())
+        .on_gossip_select(world, player_guid, source_guid, list_index)
+        .await
 }
 
 /// Handle CMSG_BANKER_ACTIVATE (0x1B5)

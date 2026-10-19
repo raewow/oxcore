@@ -9,6 +9,7 @@ use tracing::debug;
 
 use super::actions::LuaAction;
 use super::snapshot::PlayerSnapshot;
+use crate::game::npc::gossip::{PlayerGossipMenu, PreparedGossipOption};
 use crate::World;
 use oxcore_shared::messages::gossip::{
     GossipOptionData, GossipQuestData, SmsgGossipComplete, SmsgGossipMessage,
@@ -99,6 +100,35 @@ pub async fn execute_gossip_actions(
                 }
             }
             LuaAction::GossipSend => {
+                // Remember what the player was shown so their pick can be checked.
+                let shown = PlayerGossipMenu {
+                    source: npc_guid,
+                    menu_id: 0,
+                    options: gossip_options
+                        .iter()
+                        .map(|o| PreparedGossipOption {
+                            icon: o.icon,
+                            text: o.text.clone(),
+                            coded: o.coded,
+                            action: o.index,
+                            ..Default::default()
+                        })
+                        .collect(),
+                    quests: gossip_quests
+                        .iter()
+                        .map(|q| crate::game::npc::quest::types::GossipQuestData {
+                            quest_id: q.quest_id,
+                            icon: q.icon,
+                            level: q.level,
+                            title: q.title.clone(),
+                        })
+                        .collect(),
+                    discovered_node: false,
+                };
+                world
+                    .managers
+                    .player_mgr
+                    .with_player_mut(player_guid, |p| p.gossip = shown);
                 let msg = SmsgGossipMessage {
                     source_guid: npc_guid,
                     menu_id: 0,

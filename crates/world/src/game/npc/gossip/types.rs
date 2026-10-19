@@ -3,6 +3,9 @@
 //! Defines the core data types for gossip menus, menu items, NPC text, and broadcast text.
 //! These structures mirror the database tables: gossip_menu, gossip_menu_option, npc_text, broadcast_text.
 
+use crate::game::npc::quest::types::GossipQuestData;
+use oxcore_shared::protocol::ObjectGuid;
+
 /// Gossip menu (menu ID -> text ID mapping)
 #[derive(Debug, Clone)]
 pub struct GossipMenu {
@@ -215,6 +218,38 @@ pub mod gossip_option {
     pub const UNLEARNTALENTS: u32 = 16;
     /// Unlearn pet skills
     pub const UNLEARNPETSKILLS: u32 = 17;
+}
+
+/// One option of the menu a player was shown; its position in the list is the index the
+/// client sends back.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PreparedGossipOption {
+    pub icon: u8,
+    pub text: String,
+    /// Asks the player to type a code before the option is accepted.
+    pub coded: bool,
+    pub box_text: String,
+    pub box_money: u32,
+    /// Script-defined sender; zero for database options.
+    pub sender: u32,
+    /// The option type for database options, or the script-defined action.
+    pub action: u32,
+    /// Sub-menu to open (> 0), close the window (< 0) or stay (0).
+    pub action_menu: i32,
+    pub action_poi: u32,
+    pub action_script: u32,
+}
+
+/// The gossip menu a player currently has open.
+#[derive(Debug, Clone, Default)]
+pub struct PlayerGossipMenu {
+    /// The creature or game object the menu belongs to.
+    pub source: ObjectGuid,
+    pub menu_id: u32,
+    pub options: Vec<PreparedGossipOption>,
+    pub quests: Vec<GossipQuestData>,
+    /// Talking to a flight master just taught the player its node.
+    pub discovered_node: bool,
 }
 
 /// Maximum number of gossip menu items

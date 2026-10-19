@@ -29,6 +29,8 @@ impl CreatureRepository {
                        damage_variance, unit_class::BIGINT AS unit_class,
                        base_attack_time, static_flags1, static_flags2, inhabit_type::BIGINT AS inhabit_type, flags_extra, type::BIGINT AS creature_type,
                        gossip_menu_id, vendor_id, trainer_id, trainer_type::BIGINT AS trainer_type,
+                       trainer_spell::BIGINT AS trainer_spell, trainer_class::BIGINT AS trainer_class,
+                       trainer_race::BIGINT AS trainer_race,
                        "rank"::BIGINT AS rank, spell_id1::BIGINT AS spell_id1,
                        spell_id2::BIGINT AS spell_id2, spell_id3::BIGINT AS spell_id3,
                        spell_id4::BIGINT AS spell_id4, gold_min, gold_max,

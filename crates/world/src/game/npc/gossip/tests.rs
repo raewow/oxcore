@@ -1,139 +1,137 @@
 //! Tests for GossipSystem behavior
 //!
-//! Covers the critical invariant fixed in this session:
-//! - TRAINER and VENDOR gossip options must NOT send SMSG_GOSSIP_COMPLETE before
-//!   their respective windows are opened (CloseGossip() is never called first).
-//! - BANKER must send SMSG_SHOW_BANK with the banker GUID.
-//! - Other options such as INNKEEPER must send SMSG_GOSSIP_COMPLETE; the
-//!   innkeeper then asks the player to confirm the new home.
+//! - Menus are built per player: conditions, NPC flags and per-service checks decide which
+//!   options show, and the greeting is the best-matching conditioned row.
+//! - A selection is the position in the menu the player was shown; anything else is ignored.
+//! - TRAINER and VENDOR options open their window without closing the gossip first.
+//! - BANKER sends SMSG_SHOW_BANK; INNKEEPER closes gossip and asks to confirm the new home.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use parking_lot::Mutex;
 use sqlx::postgres::PgPoolOptions;
 use tokio::sync::mpsc;
 
-use crate::core::session::SessionManager;
-use crate::game::broadcast_mgr::BroadcastManager;
-use crate::game::creature::CreatureManager;
-use crate::game::npc::gossip::manager::GossipManager;
-use crate::game::npc::gossip::system::GossipSystem;
-use crate::game::npc::gossip::types::{gossip_option, GossipMenuItem};
+use crate::core::session::WorldSession;
+use crate::game::conditions::ConditionEntry;
+use crate::game::creature::manager::CreatureTemplate;
+use crate::game::creature::Creature;
+use crate::game::npc::gossip::types::{
+    gossip_option, BroadcastText, GossipMenu, GossipMenuItem, PlayerGossipMenu,
+    PreparedGossipOption,
+};
 use crate::game::player::broadcaster::PlayerBroadcaster;
 use crate::game::player::player::Player;
-use crate::game::player::PlayerManager;
-use oxcore_shared::protocol::{HighGuid, ObjectGuid, Opcode, WorldPacket};
+use crate::{Config, World};
+use oxcore_db::database::Databases;
+use oxcore_shared::protocol::{HighGuid, ObjectGuid, Opcode, Position, WorldPacket};
+
+const NPC_FLAG_GOSSIP: u32 = 0x01;
+const NPC_FLAG_TRAINER: u32 = 0x10;
+const NPC_FLAG_STABLEMASTER: u32 = 0x2000;
+const MENU: u32 = 50;
+const ENTRY: u32 = 900;
 
 // ========== INFRASTRUCTURE ==========
 
-#[derive(Clone, Debug)]
-struct CapturedPacket {
-    opcode: Opcode,
-    data: Vec<u8>,
+fn test_world() -> World {
+    let pool = || {
+        PgPoolOptions::new()
+            .connect_lazy("postgres://test:test@localhost/test")
+            .expect("lazy pool should be constructible")
+    };
+    World::new(
+        Arc::new(Databases {
+            world: pool(),
+            character: pool(),
+            auth: pool(),
+            logs: oxcore_db::database::lazy_logs_pool(),
+        }),
+        Arc::new(Config::default()),
+        50,
+        PathBuf::from("."),
+    )
 }
 
-fn create_broadcaster_with_capture(
-    guid: ObjectGuid,
-) -> (Arc<PlayerBroadcaster>, Arc<Mutex<Vec<CapturedPacket>>>) {
-    let (tx, mut rx) = mpsc::unbounded_channel::<WorldPacket>();
-    let captured = Arc::new(Mutex::new(Vec::new()));
-    let captured_clone = Arc::clone(&captured);
+/// A level-10 player (race 1, class `class`) whose outgoing packets land in the receiver.
+fn add_player(world: &World, class: u8) -> (ObjectGuid, mpsc::UnboundedReceiver<WorldPacket>) {
+    let (tx, rx) = mpsc::unbounded_channel();
+    let session = Arc::new(WorldSession::new(1, 1, "Tester".to_string(), 0, tx));
+    let guid = ObjectGuid::new_without_entry(HighGuid::Player, 1);
+    session.set_player_guid(Some(guid));
+    world.session_mgr.add_session(Arc::clone(&session));
+    world.session_mgr.register_player(session.id(), guid);
 
-    tokio::spawn(async move {
-        while let Some(packet) = rx.recv().await {
-            captured_clone.lock().push(CapturedPacket {
-                opcode: packet.opcode(),
-                data: packet.data().to_vec(),
-            });
-        }
-    });
-
-    let broadcaster = Arc::new(PlayerBroadcaster::new(tx, guid));
-    (broadcaster, captured)
+    let mut player = Player::new(guid, "Tester".to_string(), 0, 0, 1, 10, 1, class, 0);
+    player.set_broadcaster(Arc::new(PlayerBroadcaster::new(session.packet_tx(), guid)));
+    world.managers.player_mgr.add_player(player, 1);
+    (guid, rx)
 }
 
-fn assert_packet_sent(captured: &Arc<Mutex<Vec<CapturedPacket>>>, opcode: Opcode) {
-    let packets = captured.lock();
-    assert!(
-        packets.iter().any(|p| p.opcode == opcode),
-        "Expected {:?} but only got: {:?}",
-        opcode,
-        packets.iter().map(|p| p.opcode).collect::<Vec<_>>()
-    );
+/// A creature using gossip menu `MENU` with the given NPC flags.
+fn add_npc(world: &World, npc_flags: u32) -> ObjectGuid {
+    let template = CreatureTemplate {
+        entry: ENTRY,
+        name: "Gossiper".to_string(),
+        subname: None,
+        min_level: 1,
+        max_level: 1,
+        faction: 35,
+        model_id_1: 1,
+        model_id_2: 0,
+        model_id_3: 0,
+        model_id_4: 0,
+        scale: 1.0,
+        npc_flags,
+        unit_flags: 0,
+        static_flags1: 0,
+        flags_extra: 0,
+        creature_type: 7,
+        unit_class: 1,
+        health_multiplier: 1.0,
+        power_multiplier: 1.0,
+        armor_multiplier: 1.0,
+        damage_multiplier: 1.0,
+        damage_variance: 0.0,
+        attack_time: 2000,
+        rank: 0,
+        gossip_menu_id: MENU,
+        vendor_id: 0,
+        trainer_id: 0,
+        trainer_type: 0,
+        spells: [0; 4],
+        gold_min: 0,
+        gold_max: 0,
+        loot_id: 0,
+        pickpocket_loot_id: 0,
+        skinning_loot_id: 0,
+        ai: Default::default(),
+    };
+    world.managers.creature_mgr.add_template(template.clone());
+    let guid = ObjectGuid::new_creature(ENTRY, 1);
+    world.managers.creature_mgr.add_creature(Creature::new(
+        guid,
+        ENTRY,
+        1,
+        Position::default(),
+        0,
+        0,
+        &template,
+        1,
+        None,
+    ));
+    guid
 }
 
-fn assert_packet_not_sent(captured: &Arc<Mutex<Vec<CapturedPacket>>>, opcode: Opcode) {
-    let packets = captured.lock();
-    assert!(
-        !packets.iter().any(|p| p.opcode == opcode),
-        "Unexpected {:?} was sent",
-        opcode
-    );
-}
-
-fn assert_show_bank_sent(captured: &Arc<Mutex<Vec<CapturedPacket>>>, banker_guid: ObjectGuid) {
-    let packets = captured.lock();
-    let packet = packets
-        .iter()
-        .find(|p| p.opcode == Opcode::SMSG_SHOW_BANK)
-        .unwrap_or_else(|| {
-            panic!(
-                "Expected SMSG_SHOW_BANK but only got: {:?}",
-                packets.iter().map(|p| p.opcode).collect::<Vec<_>>()
-            )
-        });
-
-    assert_eq!(
-        packet.data.len(),
-        8,
-        "SMSG_SHOW_BANK must contain one raw GUID"
-    );
-    let raw = u64::from_le_bytes(packet.data[0..8].try_into().unwrap());
-    assert_eq!(raw, banker_guid.raw());
-}
-
-// ========== HELPERS ==========
-
-fn player_guid() -> ObjectGuid {
-    ObjectGuid::new_without_entry(HighGuid::Player, 1)
-}
-
-/// Build a GossipSystem with one menu item of the given option_id.
-/// Returns (system, player_guid, captured_packets).
-async fn setup_with_option(
-    option_type: u32,
-) -> (GossipSystem, ObjectGuid, Arc<Mutex<Vec<CapturedPacket>>>) {
-    let guid = player_guid();
-
-    // Player with broadcaster
-    let player_mgr = Arc::new(PlayerManager::new());
-    let (broadcaster, captured) = create_broadcaster_with_capture(guid);
-    let mut player = Player::new(guid, "Tester".to_string(), 0, 0, 1, 10, 1, 1, 0);
-    player.set_broadcaster(broadcaster);
-    player_mgr.add_player(player, 1);
-
-    // Session + broadcast managers
-    let session_mgr = Arc::new(SessionManager::new());
-    let broadcast_mgr = Arc::new(BroadcastManager::new(session_mgr, Arc::clone(&player_mgr)));
-
-    // Fake pool — only used for load(), which we don't call in tests
-    let pool = PgPoolOptions::new()
-        .connect_lazy("postgres://test:test@localhost/test")
-        .expect("lazy connect should not fail");
-    let pool = Arc::new(pool);
-
-    let gossip_mgr = Arc::new(GossipManager::new(Arc::clone(&pool)));
-    let creature_mgr = Arc::new(CreatureManager::new(Arc::clone(&pool)));
-
-    // Seed one menu (id=1) with one item of the requested option type
-    gossip_mgr.add_menu_item(GossipMenuItem {
-        menu_id: 1,
-        id: 0,
+fn option(menu_id: u32, id: u32, option_id: u32, npcflag: u32, condition_id: u32) -> GossipMenuItem {
+    GossipMenuItem {
+        menu_id,
+        id,
         option_icon: 0,
-        option_text: "Test option".to_string(),
+        option_text: format!("option {id}"),
         option_broadcast_text: 0,
-        option_id: option_type,
-        npc_option_npcflag: 0,
+        option_id,
+        npc_option_npcflag: npcflag,
         action_menu_id: 0,
         action_poi_id: 0,
         action_script_id: 0,
@@ -141,88 +139,332 @@ async fn setup_with_option(
         box_money: 0,
         box_text: String::new(),
         box_broadcast_text: 0,
-        condition_id: 0,
-    });
-
-    let system = GossipSystem::new(gossip_mgr, broadcast_mgr, player_mgr, creature_mgr);
-    (system, guid, captured)
+        condition_id,
+    }
 }
 
-// ========== TESTS ==========
+fn menu_row(entry: u32, text_id: u32, condition_id: u32) -> GossipMenu {
+    GossipMenu {
+        entry,
+        text_id,
+        script_id: 0,
+        condition_id,
+    }
+}
 
-/// TRAINER option must NOT send SMSG_GOSSIP_COMPLETE.
-/// SendTrainerList(guid) with no CloseGossip() before it.
-/// The trainer window itself replaces the gossip UI on the client.
+/// Condition `id` holds for players of class `class`.
+fn class_condition(world: &World, id: u32, class: u8) {
+    world.managers.condition_mgr.add_for_test(
+        id,
+        ConditionEntry {
+            kind: 14,
+            values: [0, 1 << (class - 1), 0, 0],
+            flags: 0,
+        },
+    );
+}
+
+fn shown_texts(world: &World, player: ObjectGuid) -> Vec<String> {
+    world
+        .managers
+        .player_mgr
+        .with_player(player, |p| p.gossip.options.iter().map(|o| o.text.clone()).collect())
+        .unwrap()
+}
+
+fn sent(rx: &mut mpsc::UnboundedReceiver<WorldPacket>) -> Vec<WorldPacket> {
+    std::iter::from_fn(|| rx.try_recv().ok()).collect()
+}
+
+fn opcodes(packets: &[WorldPacket]) -> Vec<Opcode> {
+    packets.iter().map(|p| p.opcode()).collect()
+}
+
+/// Puts one option of type `action` in front of the player as if they had been shown it.
+fn show_option(world: &World, player: ObjectGuid, source: ObjectGuid, action: u32) {
+    world.managers.player_mgr.with_player_mut(player, |p| {
+        p.gossip = PlayerGossipMenu {
+            source,
+            menu_id: MENU,
+            options: vec![PreparedGossipOption {
+                action,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+    });
+}
+
+// ========== MENU BUILDING ==========
+
+#[tokio::test]
+async fn failed_condition_hides_option() {
+    let world = test_world();
+    let (player, _rx) = add_player(&world, 1);
+    let npc = add_npc(&world, NPC_FLAG_GOSSIP);
+    class_condition(&world, 1, 1);
+    class_condition(&world, 2, 8);
+    let gossip = &world.systems.gossip_manager;
+    gossip.add_menu(menu_row(MENU, 1, 0));
+    gossip.add_menu_item(option(MENU, 0, gossip_option::GOSSIP, NPC_FLAG_GOSSIP, 1));
+    gossip.add_menu_item(option(MENU, 1, gossip_option::GOSSIP, NPC_FLAG_GOSSIP, 2));
+
+    world.systems.gossip.prepare_gossip_menu(&world, player, npc, MENU);
+
+    assert_eq!(shown_texts(&world, player), vec!["option 0"]);
+}
+
+#[tokio::test]
+async fn game_master_sees_conditioned_option_marked() {
+    let world = test_world();
+    let (player, _rx) = add_player(&world, 1);
+    world
+        .managers
+        .player_mgr
+        .with_player_mut(player, |p| p.gm_mode = true);
+    let npc = add_npc(&world, NPC_FLAG_GOSSIP);
+    class_condition(&world, 2, 8);
+    let gossip = &world.systems.gossip_manager;
+    gossip.add_menu(menu_row(MENU, 1, 0));
+    gossip.add_menu_item(option(MENU, 0, gossip_option::GOSSIP, NPC_FLAG_GOSSIP, 2));
+
+    world.systems.gossip.prepare_gossip_menu(&world, player, npc, MENU);
+
+    assert_eq!(shown_texts(&world, player), vec!["option 0 (GM mode is ON)"]);
+}
+
+#[tokio::test]
+async fn option_needs_one_of_its_npc_flags() {
+    let world = test_world();
+    let (player, _rx) = add_player(&world, 3);
+    let npc = add_npc(&world, NPC_FLAG_GOSSIP | NPC_FLAG_STABLEMASTER);
+    let gossip = &world.systems.gossip_manager;
+    gossip.add_menu(menu_row(MENU, 1, 0));
+    gossip.add_menu_item(option(MENU, 0, gossip_option::GOSSIP, 0, 0));
+    gossip.add_menu_item(option(MENU, 1, gossip_option::GOSSIP, NPC_FLAG_TRAINER, 0));
+    gossip.add_menu_item(option(MENU, 2, gossip_option::STABLEPET, NPC_FLAG_STABLEMASTER, 0));
+
+    world.systems.gossip.prepare_gossip_menu(&world, player, npc, MENU);
+
+    assert_eq!(shown_texts(&world, player), vec!["option 2"]);
+}
+
+#[tokio::test]
+async fn stable_option_is_for_hunters_only() {
+    let world = test_world();
+    let (player, _rx) = add_player(&world, 1);
+    let npc = add_npc(&world, NPC_FLAG_STABLEMASTER);
+    let gossip = &world.systems.gossip_manager;
+    gossip.add_menu(menu_row(MENU, 1, 0));
+    gossip.add_menu_item(option(MENU, 0, gossip_option::STABLEPET, NPC_FLAG_STABLEMASTER, 0));
+
+    world.systems.gossip.prepare_gossip_menu(&world, player, npc, MENU);
+
+    assert!(shown_texts(&world, player).is_empty());
+}
+
+#[tokio::test]
+async fn default_menu_without_options_offers_shared_options() {
+    let world = test_world();
+    let (player, _rx) = add_player(&world, 3);
+    let npc = add_npc(&world, NPC_FLAG_STABLEMASTER);
+    let gossip = &world.systems.gossip_manager;
+    gossip.add_menu(menu_row(MENU, 1, 0));
+    gossip.add_menu_item(option(0, 12, gossip_option::STABLEPET, NPC_FLAG_STABLEMASTER, 0));
+
+    world.systems.gossip.prepare_gossip_menu(&world, player, npc, MENU);
+    assert_eq!(shown_texts(&world, player), vec!["option 12"]);
+
+    // A sub-menu without options stays empty.
+    world.systems.gossip.prepare_gossip_menu(&world, player, npc, MENU + 1);
+    assert!(shown_texts(&world, player).is_empty());
+}
+
+#[tokio::test]
+async fn option_text_follows_broadcast_text_and_gender() {
+    let world = test_world();
+    let (player, _rx) = add_player(&world, 1);
+    world
+        .managers
+        .player_mgr
+        .with_player_mut(player, |p| p.gender = 1);
+    let npc = add_npc(&world, NPC_FLAG_GOSSIP);
+    let gossip = &world.systems.gossip_manager;
+    gossip.add_menu(menu_row(MENU, 1, 0));
+    gossip.add_broadcast_text(BroadcastText {
+        entry: 77,
+        male_text: "Hello, sir".to_string(),
+        female_text: "Hello, madam".to_string(),
+        chat_type: 0,
+        language_id: 0,
+        sound_id: 0,
+        emote_ids: [0; 3],
+        emote_delays: [0; 3],
+    });
+    let mut item = option(MENU, 0, gossip_option::GOSSIP, NPC_FLAG_GOSSIP, 0);
+    item.option_broadcast_text = 77;
+    gossip.add_menu_item(item);
+
+    world.systems.gossip.prepare_gossip_menu(&world, player, npc, MENU);
+
+    assert_eq!(shown_texts(&world, player), vec!["Hello, madam"]);
+}
+
+#[tokio::test]
+async fn greeting_is_highest_met_condition() {
+    let world = test_world();
+    let (player, _rx) = add_player(&world, 1);
+    let npc = add_npc(&world, NPC_FLAG_GOSSIP);
+    class_condition(&world, 3, 1);
+    class_condition(&world, 5, 1);
+    class_condition(&world, 9, 8);
+    let gossip = &world.systems.gossip_manager;
+    gossip.add_menu(menu_row(MENU, 100, 0));
+    gossip.add_menu(menu_row(MENU, 103, 3));
+    gossip.add_menu(menu_row(MENU, 105, 5));
+    gossip.add_menu(menu_row(MENU, 109, 9));
+
+    let text = world.systems.gossip.gossip_text_id(&world, player, npc, MENU);
+    assert_eq!(text, 105);
+
+    let world = test_world();
+    let (player, _rx) = add_player(&world, 2);
+    let npc = add_npc(&world, NPC_FLAG_GOSSIP);
+    class_condition(&world, 5, 1);
+    let gossip = &world.systems.gossip_manager;
+    gossip.add_menu(menu_row(MENU, 100, 0));
+    gossip.add_menu(menu_row(MENU, 105, 5));
+    assert_eq!(world.systems.gossip.gossip_text_id(&world, player, npc, MENU), 100);
+}
+
+#[tokio::test]
+async fn options_are_numbered_by_position() {
+    let world = test_world();
+    let (player, mut rx) = add_player(&world, 1);
+    let npc = add_npc(&world, NPC_FLAG_GOSSIP);
+    let gossip = &world.systems.gossip_manager;
+    gossip.add_menu(menu_row(MENU, 1, 0));
+    gossip.add_menu_item(option(MENU, 4, gossip_option::GOSSIP, NPC_FLAG_GOSSIP, 0));
+    gossip.add_menu_item(option(MENU, 9, gossip_option::GOSSIP, NPC_FLAG_GOSSIP, 0));
+
+    world.systems.gossip.gossip_hello(&world, player, npc).await.unwrap();
+
+    let packets = sent(&mut rx);
+    let menu = packets
+        .iter()
+        .find(|p| p.opcode() == Opcode::SMSG_GOSSIP_MESSAGE)
+        .expect("gossip menu sent");
+    let data = menu.data();
+    // guid(8) text(4) count(4), then index(4) icon(1) coded(1) text...
+    assert_eq!(u32::from_le_bytes(data[16..20].try_into().unwrap()), 0);
+    let second = data[22..].iter().position(|&b| b == 0).unwrap() + 23;
+    assert_eq!(u32::from_le_bytes(data[second..second + 4].try_into().unwrap()), 1);
+}
+
+// ========== SELECTION ==========
+
+#[tokio::test]
+async fn unshown_option_is_ignored() {
+    let world = test_world();
+    let (player, mut rx) = add_player(&world, 1);
+    let npc = add_npc(&world, NPC_FLAG_GOSSIP);
+    show_option(&world, player, npc, gossip_option::BANKER);
+
+    world.systems.gossip.on_gossip_select(&world, player, npc, 1).await.unwrap();
+    let other = ObjectGuid::new_creature(ENTRY, 2);
+    world.systems.gossip.on_gossip_select(&world, player, other, 0).await.unwrap();
+
+    assert!(sent(&mut rx).is_empty());
+}
+
 #[tokio::test]
 async fn trainer_option_does_not_send_gossip_complete() {
-    let (system, guid, captured) = setup_with_option(gossip_option::TRAINER).await;
-    let npc_guid = ObjectGuid::from_raw(0xF130_0000_00C6_0001);
+    let world = test_world();
+    let (player, mut rx) = add_player(&world, 1);
+    let npc = add_npc(&world, NPC_FLAG_TRAINER);
+    show_option(&world, player, npc, gossip_option::TRAINER);
 
-    // handle_option_select errors if option not found; suppress error (it returns Ok here)
-    let _ = system.handle_option_select(guid, npc_guid, 1, 0).await;
+    let _ = world.systems.gossip.on_gossip_select(&world, player, npc, 0).await;
 
-    tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
-
-    assert_packet_not_sent(&captured, Opcode::SMSG_GOSSIP_COMPLETE);
+    assert!(!opcodes(&sent(&mut rx)).contains(&Opcode::SMSG_GOSSIP_COMPLETE));
 }
 
-/// VENDOR option must NOT send SMSG_GOSSIP_COMPLETE.
-/// SendListInventory() with no CloseGossip() before it.
 #[tokio::test]
-async fn vendor_option_does_not_send_gossip_complete() {
-    let (system, guid, captured) = setup_with_option(gossip_option::VENDOR).await;
-    let npc_guid = ObjectGuid::from_raw(0xF130_0000_00C6_0001);
+async fn vendor_options_do_not_send_gossip_complete() {
+    for action in [gossip_option::VENDOR, gossip_option::ARMORER] {
+        let world = test_world();
+        let (player, mut rx) = add_player(&world, 1);
+        let npc = add_npc(&world, 0x80);
+        show_option(&world, player, npc, action);
 
-    let _ = system.handle_option_select(guid, npc_guid, 1, 0).await;
+        let _ = world.systems.gossip.on_gossip_select(&world, player, npc, 0).await;
 
-    tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
-
-    assert_packet_not_sent(&captured, Opcode::SMSG_GOSSIP_COMPLETE);
+        assert!(!opcodes(&sent(&mut rx)).contains(&Opcode::SMSG_GOSSIP_COMPLETE));
+    }
 }
 
-/// ARMORER option must NOT send SMSG_GOSSIP_COMPLETE (same branch as VENDOR).
 #[tokio::test]
-async fn armorer_option_does_not_send_gossip_complete() {
-    let (system, guid, captured) = setup_with_option(gossip_option::ARMORER).await;
-    let npc_guid = ObjectGuid::from_raw(0xF130_0000_00C6_0001);
+async fn innkeeper_option_closes_gossip_and_asks_to_bind() {
+    let world = test_world();
+    let (player, mut rx) = add_player(&world, 1);
+    let npc = add_npc(&world, 0x80);
+    show_option(&world, player, npc, gossip_option::INNKEEPER);
 
-    let _ = system.handle_option_select(guid, npc_guid, 1, 0).await;
+    world.systems.gossip.on_gossip_select(&world, player, npc, 0).await.unwrap();
 
-    tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
-
-    assert_packet_not_sent(&captured, Opcode::SMSG_GOSSIP_COMPLETE);
-}
-
-/// INNKEEPER option MUST send SMSG_GOSSIP_COMPLETE (different branch), then
-/// the bind confirmation naming the innkeeper.
-#[tokio::test]
-async fn innkeeper_option_sends_gossip_complete() {
-    let (system, guid, captured) = setup_with_option(gossip_option::INNKEEPER).await;
-    let npc_guid = ObjectGuid::from_raw(0xF130_0000_00C6_0001);
-
-    let _ = system.handle_option_select(guid, npc_guid, 1, 0).await;
-
-    tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
-
-    assert_packet_sent(&captured, Opcode::SMSG_GOSSIP_COMPLETE);
-    let packets = captured.lock();
+    let packets = sent(&mut rx);
+    assert!(opcodes(&packets).contains(&Opcode::SMSG_GOSSIP_COMPLETE));
     let confirm = packets
         .iter()
-        .find(|packet| packet.opcode == Opcode::SMSG_BINDER_CONFIRM)
-        .expect("innkeeper asks to confirm the bind");
-    assert_eq!(confirm.data, npc_guid.raw().to_le_bytes());
+        .find(|p| p.opcode() == Opcode::SMSG_BINDER_CONFIRM)
+        .expect("binder confirm sent");
+    assert_eq!(&confirm.data()[..], &npc.raw().to_le_bytes()[..]);
 }
 
-/// BANKER option must open the bank window.
 #[tokio::test]
-async fn banker_option_sends_show_bank() {
-    let (system, guid, captured) = setup_with_option(gossip_option::BANKER).await;
-    let npc_guid = ObjectGuid::from_raw(0xF130_0000_00C6_0001);
+async fn banker_option_shows_bank() {
+    let world = test_world();
+    let (player, mut rx) = add_player(&world, 1);
+    let npc = add_npc(&world, 0x100);
+    show_option(&world, player, npc, gossip_option::BANKER);
 
-    let _ = system.handle_option_select(guid, npc_guid, 1, 0).await;
+    world.systems.gossip.on_gossip_select(&world, player, npc, 0).await.unwrap();
 
-    tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+    let packets = sent(&mut rx);
+    assert!(!opcodes(&packets).contains(&Opcode::SMSG_GOSSIP_COMPLETE));
+    let bank = packets
+        .iter()
+        .find(|p| p.opcode() == Opcode::SMSG_SHOW_BANK)
+        .expect("bank shown");
+    assert_eq!(&bank.data()[..], &npc.raw().to_le_bytes()[..]);
+}
 
-    assert_packet_not_sent(&captured, Opcode::SMSG_GOSSIP_COMPLETE);
-    assert_show_bank_sent(&captured, npc_guid);
+#[tokio::test]
+async fn sub_menu_option_opens_next_menu() {
+    let world = test_world();
+    let (player, mut rx) = add_player(&world, 1);
+    let npc = add_npc(&world, NPC_FLAG_GOSSIP);
+    let gossip = &world.systems.gossip_manager;
+    gossip.add_menu(menu_row(MENU, 1, 0));
+    gossip.add_menu(menu_row(MENU + 1, 2, 0));
+    let mut item = option(MENU, 0, gossip_option::GOSSIP, NPC_FLAG_GOSSIP, 0);
+    item.action_menu_id = (MENU + 1) as i32;
+    gossip.add_menu_item(item);
+    gossip.add_menu_item(option(MENU + 1, 0, gossip_option::GOSSIP, NPC_FLAG_GOSSIP, 0));
+
+    world.systems.gossip.prepare_gossip_menu(&world, player, npc, MENU);
+    world.systems.gossip.on_gossip_select(&world, player, npc, 0).await.unwrap();
+
+    let menu_id = world
+        .managers
+        .player_mgr
+        .with_player(player, |p| p.gossip.menu_id)
+        .unwrap();
+    assert_eq!(menu_id, MENU + 1);
+    let packets = sent(&mut rx);
+    let menu = packets
+        .iter()
+        .find(|p| p.opcode() == Opcode::SMSG_GOSSIP_MESSAGE)
+        .expect("sub-menu sent");
+    assert_eq!(u32::from_le_bytes(menu.data()[8..12].try_into().unwrap()), 2);
 }

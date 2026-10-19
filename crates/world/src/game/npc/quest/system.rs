@@ -2299,17 +2299,15 @@ impl QuestSystem {
             .send_msg_to_player(player_guid, values_update);
     }
 
-    /// Send quest giver quest list
-    pub fn send_quest_giver_quest_list(
+    /// Lists `quests` under `greeting` in the quest-giver window.
+    pub fn send_quest_list(
         &self,
         player_guid: ObjectGuid,
         quest_giver_guid: ObjectGuid,
-        entry: u32,
-        world: &World,
-    ) -> Result<()> {
-        let quest_items = self.prepare_quest_menu(player_guid, entry, world);
-
-        let quests: Vec<QuestListItem> = quest_items
+        quests: &[super::types::GossipQuestData],
+        greeting: &crate::game::npc::gossip::system::QuestListGreeting,
+    ) {
+        let quests: Vec<QuestListItem> = quests
             .iter()
             .map(|q| QuestListItem {
                 quest_id: q.quest_id,
@@ -2321,45 +2319,45 @@ impl QuestSystem {
 
         let msg = SmsgQuestgiverQuestListV2 {
             guid: quest_giver_guid,
-            title: "",
-            emote_delay: 0,
-            emote: 0,
+            title: &greeting.text,
+            emote_delay: greeting.emote_delay,
+            emote: greeting.emote,
             quests: &quests,
         };
         self.broadcast_mgr.send_msg_to_player(player_guid, msg);
-
-        Ok(())
     }
 
-    pub fn send_gameobject_quest_list(
+    /// Opens the one quest a giver offers: the turn-in window when it is ready or under
+    /// way (or a repeatable quest the player can hand in again), else its details.
+    pub async fn send_single_quest(
         &self,
         player_guid: ObjectGuid,
         quest_giver_guid: ObjectGuid,
-        entry: u32,
+        quest_id: u32,
+        icon: u32,
         world: &World,
     ) -> Result<()> {
-        let quest_items = self.prepare_gameobject_quest_menu(player_guid, entry, world);
-
-        let quests: Vec<QuestListItem> = quest_items
-            .iter()
-            .map(|q| QuestListItem {
-                quest_id: q.quest_id,
-                icon: q.icon,
-                level: q.level,
-                title: q.title.clone(),
-            })
-            .collect();
-
-        let msg = SmsgQuestgiverQuestListV2 {
-            guid: quest_giver_guid,
-            title: "Quests",
-            emote_delay: 0,
-            emote: 0,
-            quests: &quests,
+        let Some(quest) = self.manager.get_quest_template(quest_id) else {
+            return Ok(());
         };
+        let rewarded = self
+            .player_mgr
+            .with_player(player_guid, |p| p.rewarded_quests.contains(&quest_id))
+            .unwrap_or(false);
 
-        self.broadcast_mgr.send_msg_to_player(player_guid, msg);
-        Ok(())
+        if (icon == DialogStatus::RewardRep as u32 && !rewarded)
+            || icon == DialogStatus::Incomplete as u32
+        {
+            return self
+                .handle_quest_complete(player_guid, quest_giver_guid, quest_id, world)
+                .await;
+        }
+        if quest.is_repeatable() && self.can_complete_repeatable_quest(player_guid, &quest, world)
+        {
+            self.send_request_items(player_guid, quest_giver_guid, &quest, true);
+            return Ok(());
+        }
+        self.send_quest_details(player_guid, quest_giver_guid, quest_id, world)
     }
 
     /// Initialize the quest system
