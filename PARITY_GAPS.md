@@ -20,7 +20,7 @@ partial.
 ## Area triggers and teleporting
 
 - **Battleground entrance triggers.** The level/team refusal for battleground
-  entrances is missing because there is no battleground system.
+  entrances is missing because there is no battleground system (see below).
 - **Bind area ignores WMO areas.** Binding at an inn reads the area from
   terrain only, so inns inside buildings may record the zone instead of the
   sub-area.
@@ -34,6 +34,26 @@ partial.
 - **Encounter in progress** is approximated: a raid-locking creature in combat
   counts as an engaged encounter, since instance scripts expose no generic
   in-progress state.
+
+## Battlegrounds
+
+There is no battleground system; only scaffolding exists.
+
+- **Wrong 1.12 opcodes.** `SMSG_BATTLEFIELD_JOINED` 0x2E1 (really
+  `CMSG_LEAVE_BATTLEFIELD`), `CMSG_LEAVE_BATTLEFIELD` 0x2E5 (really
+  `CMSG_GM_UNTEACH`), `CMSG_BATTLEFIELD_UN_QUEUE` 0x23F (really
+  `SMSG_BATTLEFIELD_WIN`). Ten battleground opcodes are missing.
+- **Wrong 1.12 layouts.** `SmsgBattlefieldStatus` has no queue slot and the
+  wrong field order; `SmsgBattlefieldList` has no battlemaster guid or bracket.
+- **No world-state updates** on either protocol (`SMSG_UPDATE_WORLD_STATE`).
+- **No queue, invitations, per-match map copies, event-gated spawns, match
+  lifecycle, entry point, leaving/Deserter, raid groups, scoreboard or
+  spirit-guide waves.** The world tables for all of this are populated but not
+  loaded. A character saved on a battleground map logs into one shared copy.
+- **No Warsong Gulch, Arathi Basin or Alterac Valley logic.**
+- **No PvP flag.** `CMSG_TOGGLE_PVP` is unhandled and nothing sets the flag.
+- **Honour is a stand-in.** Simplified formula, no dishonourable kills, weekly
+  honour kept in memory but never saved, no honour rank or weekly ranking.
 
 ## Vendors
 
