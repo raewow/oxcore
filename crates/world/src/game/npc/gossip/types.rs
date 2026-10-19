@@ -136,6 +136,19 @@ pub struct BroadcastText {
     pub emote_delays: [u32; 3],
 }
 
+/// A map marker a gossip option can show (`points_of_interest`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PointOfInterest {
+    pub entry: u32,
+    pub x: f32,
+    pub y: f32,
+    pub icon: u32,
+    pub flags: u32,
+    /// Importance, which decides how prominently the client draws the marker.
+    pub data: u32,
+    pub icon_name: String,
+}
+
 /// Gossip option icon types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]

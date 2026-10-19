@@ -9,7 +9,9 @@ use sqlx::PgPool;
 use std::sync::Arc;
 use tracing::info;
 
-use super::types::{BroadcastText, GossipMenu, GossipMenuItem, NpcText, NpcTextOption};
+use super::types::{
+    BroadcastText, GossipMenu, GossipMenuItem, NpcText, NpcTextOption, PointOfInterest,
+};
 use oxcore_db::database::world::repositories::GossipRepository;
 
 /// Manages gossip menu data (state storage + database loading)
@@ -26,6 +28,8 @@ pub struct GossipManager {
     broadcast_texts: DashMap<u32, BroadcastText>,
     /// Greeting text by creature spawn database guid
     npc_gossip_texts: DashMap<u32, u32>,
+    /// Map markers by entry
+    points_of_interest: DashMap<u32, PointOfInterest>,
 }
 
 impl GossipManager {
@@ -38,6 +42,7 @@ impl GossipManager {
             npc_texts: DashMap::new(),
             broadcast_texts: DashMap::new(),
             npc_gossip_texts: DashMap::new(),
+            points_of_interest: DashMap::new(),
         }
     }
 
@@ -141,13 +146,26 @@ impl GossipManager {
             self.set_npc_gossip_text(row.npc_guid.try_into()?, row.textid.try_into()?);
         }
 
+        for row in &data.points_of_interest {
+            self.add_point_of_interest(PointOfInterest {
+                entry: row.entry.try_into()?,
+                x: row.x,
+                y: row.y,
+                icon: row.icon.try_into()?,
+                flags: row.flags.try_into()?,
+                data: row.data.try_into()?,
+                icon_name: row.icon_name.clone(),
+            });
+        }
+
         info!(
-            "GossipManager loaded: {} menus, {} options, {} npc_texts, {} broadcast_texts, {} npc_gossip overrides",
+            "GossipManager loaded: {} menus, {} options, {} npc_texts, {} broadcast_texts, {} npc_gossip overrides, {} points of interest",
             data.menus.len(),
             data.options.len(),
             data.npc_texts.len(),
             data.broadcast_texts.len(),
-            data.npc_gossip.len()
+            data.npc_gossip.len(),
+            data.points_of_interest.len()
         );
 
         Ok(())
@@ -213,5 +231,15 @@ impl GossipManager {
     /// Set the greeting text for one creature spawn, by its database guid
     pub fn set_npc_gossip_text(&self, spawn_id: u32, text_id: u32) {
         self.npc_gossip_texts.insert(spawn_id, text_id);
+    }
+
+    /// A map marker by entry
+    pub fn get_point_of_interest(&self, entry: u32) -> Option<PointOfInterest> {
+        self.points_of_interest.get(&entry).map(|p| p.clone())
+    }
+
+    /// Add a map marker
+    pub fn add_point_of_interest(&self, poi: PointOfInterest) {
+        self.points_of_interest.insert(poi.entry, poi);
     }
 }

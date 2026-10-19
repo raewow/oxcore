@@ -104,6 +104,18 @@ pub struct NpcGossipRow {
     pub textid: i64,
 }
 
+/// Row structure for points_of_interest map markers
+#[derive(sqlx::FromRow)]
+pub struct PointOfInterestRow {
+    pub entry: i64,
+    pub x: f32,
+    pub y: f32,
+    pub icon: i64,
+    pub flags: i64,
+    pub data: i64,
+    pub icon_name: String,
+}
+
 /// Gossip data loaded from database
 pub struct GossipLoadData {
     pub menus: Vec<GossipMenuRow>,
@@ -111,6 +123,7 @@ pub struct GossipLoadData {
     pub npc_texts: Vec<NpcTextRow>,
     pub broadcast_texts: Vec<BroadcastTextRow>,
     pub npc_gossip: Vec<NpcGossipRow>,
+    pub points_of_interest: Vec<PointOfInterestRow>,
 }
 
 /// Repository for gossip-related database operations
@@ -131,6 +144,7 @@ impl GossipRepository {
         let npc_texts = self.load_npc_texts().await?;
         let broadcast_texts = self.load_broadcast_texts().await?;
         let npc_gossip = self.load_npc_gossip().await?;
+        let points_of_interest = self.load_points_of_interest().await?;
 
         Ok(GossipLoadData {
             menus,
@@ -138,6 +152,7 @@ impl GossipRepository {
             npc_texts,
             broadcast_texts,
             npc_gossip,
+            points_of_interest,
         })
     }
 
@@ -193,5 +208,15 @@ impl GossipRepository {
             .fetch_all(&*self.pool)
             .await
             .context("Failed to load NPC gossip text overrides")
+    }
+
+    /// Load the map markers gossip options can point to
+    async fn load_points_of_interest(&self) -> Result<Vec<PointOfInterestRow>> {
+        sqlx::query_as::<_, PointOfInterestRow>(
+            "SELECT entry, x, y, icon, flags, data, icon_name FROM world.points_of_interest",
+        )
+        .fetch_all(&*self.pool)
+        .await
+        .context("Failed to load points of interest")
     }
 }

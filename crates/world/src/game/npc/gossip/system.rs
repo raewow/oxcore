@@ -24,7 +24,8 @@ use crate::game::player::PlayerManager;
 use crate::World;
 use oxcore_shared::game::reputation::ReputationRank;
 use oxcore_shared::messages::{
-    GossipOptionData, MsgTalentWipeConfirm, SmsgGossipComplete, SmsgGossipMessage, SmsgShowBank,
+    GossipOptionData, MsgTalentWipeConfirm, SmsgGossipComplete, SmsgGossipMessage, SmsgGossipPoi,
+    SmsgShowBank,
 };
 use oxcore_shared::protocol::ObjectGuid;
 
@@ -366,6 +367,9 @@ impl GossipSystem {
 
         match option.action {
             gossip_option::GOSSIP => {
+                if option.action_poi != 0 {
+                    self.send_point_of_interest(player_guid, option.action_poi);
+                }
                 if option.action_menu > 0 {
                     self.prepare_gossip_menu(
                         world,
@@ -563,6 +567,26 @@ impl GossipSystem {
                     .flatten()
             })
             .flatten()
+    }
+
+    /// Marks a point of interest on the player's map.
+    pub fn send_point_of_interest(&self, player_guid: ObjectGuid, poi_id: u32) {
+        let Some(poi) = self.manager.get_point_of_interest(poi_id) else {
+            warn!("Gossip option points to unknown point of interest {}", poi_id);
+            return;
+        };
+        self.broadcast_mgr.send_msg_to_player(
+            player_guid,
+            SmsgGossipPoi {
+                poi_id: poi.entry,
+                x: poi.x,
+                y: poi.y,
+                icon: poi.icon,
+                flags: poi.flags,
+                data: poi.data,
+                name: poi.icon_name,
+            },
+        );
     }
 
     /// Send gossip complete (close window)

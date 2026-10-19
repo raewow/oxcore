@@ -287,13 +287,13 @@ impl ToWorldPacket for SmsgGossipPoi {
         Some(writer.finish(Opcode::SMSG_GOSSIP_POI))
     }
 
+    /// Vanilla has no POI id: flags lead, then the position, icon and importance.
     fn to_vanilla(&self) -> WorldPacket {
         let mut packet = WorldPacket::new(Opcode::SMSG_GOSSIP_POI);
-        packet.write_u32(self.poi_id);
+        packet.write_u32(self.flags);
         packet.write_f32(self.x);
         packet.write_f32(self.y);
         packet.write_u32(self.icon);
-        packet.write_u32(self.flags);
         packet.write_u32(self.data);
         packet.write_cstring(&self.name);
         packet
@@ -534,6 +534,29 @@ mod tests {
     }
 
     // ---- SMSG_SHOW_BANK ----
+
+    #[test]
+    fn vanilla_gossip_poi_leads_with_flags_and_has_no_id() {
+        let poi = SmsgGossipPoi {
+            poi_id: 658,
+            x: -9459.35,
+            y: 42.08,
+            icon: 6,
+            flags: 99,
+            data: 2,
+            name: "Lion's Pride Inn".to_string(),
+        };
+        let pkt = poi.to_vanilla();
+        let data = pkt.data();
+
+        assert_eq!(read_u32_le(data, 0), 99);
+        assert_eq!(read_f32_le(data, 4), -9459.35);
+        assert_eq!(read_f32_le(data, 8), 42.08);
+        assert_eq!(read_u32_le(data, 12), 6);
+        assert_eq!(read_u32_le(data, 16), 2);
+        assert_eq!(read_cstring(data, 20).0, "Lion's Pride Inn");
+        assert_eq!(data.len(), 20 + "Lion's Pride Inn".len() + 1);
+    }
 
     #[test]
     fn smsg_show_bank_writes_raw_banker_guid() {

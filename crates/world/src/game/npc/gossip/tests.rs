@@ -621,3 +621,43 @@ async fn option_starts_its_script() {
 
     assert!(is_scheduled(ScriptTable::Gossip, 7002, Some(npc), Some(player)));
 }
+
+// ========== POINTS OF INTEREST ==========
+
+#[tokio::test]
+async fn option_marks_its_point_of_interest_before_the_next_menu() {
+    use crate::game::npc::gossip::types::PointOfInterest;
+    let world = test_world();
+    let (player, mut rx) = add_player(&world, 1);
+    let npc = add_npc(&world, NPC_FLAG_GOSSIP);
+    let gossip = &world.systems.gossip_manager;
+    gossip.add_point_of_interest(PointOfInterest {
+        entry: 658,
+        x: 1.0,
+        y: 2.0,
+        icon: 6,
+        flags: 99,
+        data: 0,
+        icon_name: "Lion's Pride Inn".to_string(),
+    });
+    gossip.add_menu(menu_row(MENU + 1, 2, 0));
+    world.managers.player_mgr.with_player_mut(player, |p| {
+        p.gossip = PlayerGossipMenu {
+            source: npc,
+            menu_id: MENU,
+            options: vec![PreparedGossipOption {
+                action: gossip_option::GOSSIP,
+                action_poi: 658,
+                action_menu: (MENU + 1) as i32,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+    });
+
+    world.systems.gossip.on_gossip_select(&world, player, npc, 0).await.unwrap();
+
+    let packets = opcodes(&sent(&mut rx));
+    assert_eq!(packets[0], Opcode::SMSG_GOSSIP_POI);
+    assert!(packets.contains(&Opcode::SMSG_GOSSIP_MESSAGE));
+}
