@@ -68,6 +68,9 @@ pub struct Managers {
     pub waypoint_mgr: Arc<WaypointManager>,
     pub area_trigger_mgr: Arc<AreaTriggerManager>,
     pub taxi_mgr: Arc<crate::game::taxi::TaxiManager>,
+    pub battleground_mgr: Arc<crate::game::battleground::BattlegroundManager>,
+    pub scope_states: Arc<crate::game::pvp::ScopeStates>,
+    pub bg_events: Arc<crate::game::pvp::events::EventIndex>,
     pub condition_mgr: Arc<ConditionManager>,
     pub instance_mgr: Arc<crate::game::instance::InstanceMgr>,
     pub game_event_mgr: Arc<crate::game::game_event::GameEventManager>,
@@ -233,6 +236,9 @@ impl World {
                 waypoint_mgr,
                 area_trigger_mgr,
                 taxi_mgr: Arc::new(crate::game::taxi::TaxiManager::new()),
+                battleground_mgr: Arc::new(crate::game::battleground::BattlegroundManager::new()),
+                scope_states: Arc::new(crate::game::pvp::ScopeStates::new()),
+                bg_events: Arc::new(crate::game::pvp::events::EventIndex::new()),
                 condition_mgr,
                 instance_mgr,
                 game_event_mgr: Arc::new(crate::game::game_event::GameEventManager::new()),
@@ -491,6 +497,15 @@ impl World {
             .await
             .context("Failed to load taxi network")?;
 
+        // Battlegrounds: templates, battlemasters, entrances and event spawns.
+        crate::game::battleground::system::load(self)
+            .await
+            .context("Failed to load battlegrounds")?;
+        // Catch up on any weekly honour ranking missed while the server was down.
+        if let Err(e) = crate::game::player::honor::weekly_maintenance(self).await {
+            tracing::warn!("Honour maintenance failed: {}", e);
+        }
+
         // Initialize instance manager: id allocation, the raid reset schedule,
         // expired/unbound saves, then the respawn deadlines that survive.
         self.managers
@@ -740,6 +755,19 @@ impl World {
 
         // Players on a flight move along it.
         crate::game::taxi::flight::update(self).await?;
+
+        // Battleground queues and matches; PvP flags count down.
+        crate::game::battleground::system::update(self, diff_ms).await;
+        crate::game::pvp::flag::update(self, diff_ms);
+
+        // The weekly honour ranking: checked about once an hour.
+        static HONOR_MAINTENANCE_COUNTER: std::sync::atomic::AtomicU32 =
+            std::sync::atomic::AtomicU32::new(1);
+        if HONOR_MAINTENANCE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 72_000 == 0 {
+            if let Err(e) = crate::game::player::honor::weekly_maintenance(self).await {
+                tracing::warn!("Honour maintenance failed: {}", e);
+            }
+        }
 
         self.session_mgr.update_logout_timers(self).await?;
 
@@ -1122,6 +1150,9 @@ impl Clone for World {
                 waypoint_mgr: Arc::clone(&self.managers.waypoint_mgr),
                 area_trigger_mgr: Arc::clone(&self.managers.area_trigger_mgr),
                 taxi_mgr: Arc::clone(&self.managers.taxi_mgr),
+                battleground_mgr: Arc::clone(&self.managers.battleground_mgr),
+                scope_states: Arc::clone(&self.managers.scope_states),
+                bg_events: Arc::clone(&self.managers.bg_events),
                 condition_mgr: Arc::clone(&self.managers.condition_mgr),
                 instance_mgr: Arc::clone(&self.managers.instance_mgr),
                 game_event_mgr: Arc::clone(&self.managers.game_event_mgr),

@@ -16,7 +16,6 @@ use anyhow::Result;
 use oxcore_shared::protocol::ObjectGuid;
 use std::time::Duration;
 
-use super::gossip_executor::execute_gossip_actions;
 use crate::World;
 
 /// Called when a player enters `zone_id`.
@@ -43,9 +42,14 @@ pub async fn on_player_enter_zone(
     let snapshot = zone_snapshot(zone_id, world, 0);
     let actions = lua_mgr.with_lua(|lua| script.on_player_enter(lua, &snapshot, player_guid));
 
-    if !actions.is_empty() {
-        execute_gossip_actions(actions, player_guid, ObjectGuid::empty(), world).await?;
-    }
+    crate::game::pvp::objective::apply(
+        world,
+        crate::game::pvp::scope::Scope::Zone { zone_id },
+        None,
+        Some(player_guid),
+        actions,
+    )
+    .await;
 
     Ok(())
 }
@@ -76,9 +80,14 @@ pub async fn on_player_leave_zone(
     // Remove after the callback so the script can still see the leaving player.
     lua_mgr.with_zone_state_mut(zone_id, |state| state.remove_player(player_guid));
 
-    if !actions.is_empty() {
-        execute_gossip_actions(actions, player_guid, ObjectGuid::empty(), world).await?;
-    }
+    crate::game::pvp::objective::apply(
+        world,
+        crate::game::pvp::scope::Scope::Zone { zone_id },
+        None,
+        Some(player_guid),
+        actions,
+    )
+    .await;
 
     Ok(())
 }
@@ -120,19 +129,19 @@ pub async fn update_zone_scripts(diff: Duration, world: &World) -> Result<()> {
         let snapshot = zone_snapshot(zone_id, world, diff_ms);
         let actions = lua_mgr.with_lua(|lua| script.on_update(lua, &snapshot));
 
-        if !actions.is_empty() {
-            // Zone-wide actions are not tied to one player; address them at the
-            // first tracked player so player-scoped actions still have a target.
-            let target = snapshot_first_player(zone_id, world);
-            execute_gossip_actions(actions, target, ObjectGuid::empty(), world).await?;
-        }
+        // Zone-wide actions are not tied to one player; address player-scoped
+        // ones at the first tracked player so they still have a target.
+        let target = snapshot_first_player(zone_id, world);
+        let scope = crate::game::pvp::scope::Scope::Zone { zone_id };
+        crate::game::pvp::objective::apply(world, scope, None, Some(target), actions).await;
+        crate::game::pvp::objective::watch_auras(world, scope).await;
     }
 
     Ok(())
 }
 
 /// Build the snapshot handed to a zone callback.
-fn zone_snapshot(zone_id: u32, world: &World, diff_ms: u32) -> super::snapshot::ZoneSnapshot {
+pub(crate) fn zone_snapshot(zone_id: u32, world: &World, diff_ms: u32) -> super::snapshot::ZoneSnapshot {
     let state = world.managers.lua_mgr.get_zone_state(zone_id);
 
     // Resolve the map from a player in the zone; zone ids do not carry one.
@@ -142,7 +151,12 @@ fn zone_snapshot(zone_id: u32, world: &World, diff_ms: u32) -> super::snapshot::
         .and_then(|guid| world.managers.player_mgr.with_player(*guid, |p| p.map_id))
         .unwrap_or(0);
 
-    state.to_snapshot(map_id, zone_id, zone_id, diff_ms)
+    let mut snapshot = state.to_snapshot(map_id, zone_id, zone_id, diff_ms);
+    snapshot.scope = crate::game::pvp::objective::scope_view(
+        world,
+        crate::game::pvp::scope::Scope::Zone { zone_id },
+    );
+    snapshot
 }
 
 /// First player tracked in a zone, or an empty GUID when the zone is empty.

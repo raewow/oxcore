@@ -216,6 +216,7 @@ impl ZoneScriptState {
             guids: self.guids.clone(),
             timers: self.timers.clone(),
             diff_ms,
+            scope: Default::default(),
         }
     }
 }

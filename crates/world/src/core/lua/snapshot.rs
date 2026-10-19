@@ -235,6 +235,10 @@ pub struct InstanceSnapshot {
     pub data: HashMap<u32, u32>,
     pub guids: HashMap<u32, ObjectGuid>,
     pub timers: HashMap<u32, u32>,
+    /// Time since the last `Update` (0 outside `Update`).
+    pub diff_ms: u32,
+    /// Players, world states and match state of the copy.
+    pub scope: ScopeView,
 }
 
 impl Default for InstanceSnapshot {
@@ -247,7 +251,117 @@ impl Default for InstanceSnapshot {
             data: HashMap::new(),
             guids: HashMap::new(),
             timers: HashMap::new(),
+            diff_ms: 0,
+            scope: ScopeView::default(),
         }
+    }
+}
+
+/// What an objective script sees of its scope beyond its own data.
+#[derive(Debug, Clone, Default)]
+pub struct ScopeView {
+    /// Players inside the scope.
+    pub players: Vec<ScopePlayer>,
+    /// World states the scope set.
+    pub world_states: HashMap<u32, i32>,
+    /// Active battleground spawn events, `event1 -> event2`.
+    pub events: HashMap<u8, u8>,
+    /// The battleground match running in this copy, if any.
+    pub battleground: Option<MatchView>,
+}
+
+/// One player in a scope.
+#[derive(Debug, Clone)]
+pub struct ScopePlayer {
+    pub guid: ObjectGuid,
+    pub name: String,
+    /// 469 Alliance, 67 Horde (the battleground team, which may differ from race).
+    pub team: u32,
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub alive: bool,
+    pub level: u8,
+    pub class: u8,
+    pub race: u8,
+    pub area_id: u32,
+    pub is_gm: bool,
+    /// Spell ids of the auras the script watches that this player has.
+    pub watched_auras: Vec<u32>,
+}
+
+/// A battleground match as scripts see it.
+#[derive(Debug, Clone)]
+pub struct MatchView {
+    pub bg_type: u32,
+    /// "WAIT_JOIN", "IN_PROGRESS" or "WAIT_LEAVE".
+    pub status: &'static str,
+    pub bracket: u8,
+    pub min_level: u8,
+    pub max_level: u8,
+    /// Time since the gates opened (0 before).
+    pub elapsed_ms: u32,
+    /// A holiday weekend for this battleground is running.
+    pub weekend: bool,
+    /// 469 or 67 once decided, else 0.
+    pub winner: u32,
+    pub alliance_players: u32,
+    pub horde_players: u32,
+}
+
+impl ScopeView {
+    fn write(&self, lua: &Lua, table: &Table) -> LuaResult<()> {
+        let players = lua.create_table()?;
+        for (i, player) in self.players.iter().enumerate() {
+            let row = lua.create_table()?;
+            row.set("guid", LuaGuid(player.guid))?;
+            row.set("name", player.name.as_str())?;
+            row.set("team", player.team)?;
+            row.set("x", player.x)?;
+            row.set("y", player.y)?;
+            row.set("z", player.z)?;
+            row.set("alive", player.alive)?;
+            row.set("level", player.level)?;
+            row.set("class", player.class)?;
+            row.set("race", player.race)?;
+            row.set("area_id", player.area_id)?;
+            row.set("is_gm", player.is_gm)?;
+            let auras = lua.create_table()?;
+            for &spell in &player.watched_auras {
+                auras.set(spell, true)?;
+            }
+            row.set("auras", auras)?;
+            players.set(i + 1, row)?;
+        }
+        table.set("players", players)?;
+
+        let states = lua.create_table()?;
+        for (&id, &value) in &self.world_states {
+            states.set(id, value)?;
+        }
+        table.set("world_states", states)?;
+
+        let events = lua.create_table()?;
+        for (&event1, &event2) in &self.events {
+            events.set(event1, event2)?;
+        }
+        table.set("events", events)?;
+
+        if let Some(bg) = &self.battleground {
+            let view = lua.create_table()?;
+            view.set("type", bg.bg_type)?;
+            view.set("status", bg.status)?;
+            view.set("bracket", bg.bracket)?;
+            view.set("min_level", bg.min_level)?;
+            view.set("max_level", bg.max_level)?;
+            view.set("elapsed_ms", bg.elapsed_ms)?;
+            view.set("weekend", bg.weekend)?;
+            view.set("winner", bg.winner)?;
+            view.set("alliance_players", bg.alliance_players)?;
+            view.set("horde_players", bg.horde_players)?;
+            table.set("battleground", view)?;
+        }
+        Ok(())
     }
 }
 
@@ -262,6 +376,8 @@ pub struct ZoneSnapshot {
     pub guids: HashMap<u32, ObjectGuid>,
     pub timers: HashMap<u32, u32>,
     pub diff_ms: u32,
+    /// Players and world states of the zone.
+    pub scope: ScopeView,
 }
 
 impl Default for ZoneSnapshot {
@@ -275,6 +391,7 @@ impl Default for ZoneSnapshot {
             guids: HashMap::new(),
             timers: HashMap::new(),
             diff_ms: 0,
+            scope: ScopeView::default(),
         }
     }
 }
@@ -664,6 +781,7 @@ impl InstanceSnapshot {
         table.set("instance_id", self.instance_id)?;
         table.set("difficulty", self.difficulty)?;
         table.set("player_count", self.player_count)?;
+        table.set("diff_ms", self.diff_ms)?;
 
         let data_table = lua.create_table()?;
         for (&id, &value) in &self.data {
@@ -678,23 +796,27 @@ impl InstanceSnapshot {
         table.set("timers", timers_table)?;
 
         let data_clone = self.data.clone();
-        let get_data = lua.create_function(move |_, data_id: u32| {
+        let get_data = lua.create_function(move |_, args: mlua::MultiValue| {
+            let data_id = last_id(args);
             Ok(data_clone.get(&data_id).copied().unwrap_or(0))
         })?;
         table.set("GetData", get_data)?;
 
         let guids_clone = self.guids.clone();
-        let get_guid = lua.create_function(move |_, data_id: u32| {
+        let get_guid = lua.create_function(move |_, args: mlua::MultiValue| {
+            let data_id = last_id(args);
             Ok(guids_clone.get(&data_id).map(|g| LuaGuid(*g)))
         })?;
         table.set("GetGuid", get_guid)?;
 
         let timers_clone = self.timers.clone();
-        let is_timer_ready = lua.create_function(move |_, timer_id: u32| {
+        let is_timer_ready = lua.create_function(move |_, args: mlua::MultiValue| {
+            let timer_id = last_id(args);
             Ok(timers_clone.get(&timer_id).map(|&v| v == 0).unwrap_or(true))
         })?;
         table.set("IsTimerReady", is_timer_ready)?;
 
+        self.scope.write(lua, &table)?;
         Ok(table)
     }
 }
@@ -709,25 +831,51 @@ impl ZoneSnapshot {
         table.set("player_count", self.player_count)?;
         table.set("diff_ms", self.diff_ms)?;
 
+        let data_table = lua.create_table()?;
+        for (&id, &value) in &self.data {
+            data_table.set(id, value)?;
+        }
+        table.set("data", data_table)?;
+
+        let timers_table = lua.create_table()?;
+        for (&id, &remaining) in &self.timers {
+            timers_table.set(id, remaining)?;
+        }
+        table.set("timers", timers_table)?;
+
         let data_clone = self.data.clone();
-        let get_data = lua.create_function(move |_, data_id: u32| {
+        let get_data = lua.create_function(move |_, args: mlua::MultiValue| {
+            let data_id = last_id(args);
             Ok(data_clone.get(&data_id).copied().unwrap_or(0))
         })?;
         table.set("GetData", get_data)?;
 
         let guids_clone = self.guids.clone();
-        let get_guid = lua.create_function(move |_, data_id: u32| {
+        let get_guid = lua.create_function(move |_, args: mlua::MultiValue| {
+            let data_id = last_id(args);
             Ok(guids_clone.get(&data_id).map(|g| LuaGuid(*g)))
         })?;
         table.set("GetGuid", get_guid)?;
 
         let timers_clone = self.timers.clone();
-        let is_timer_ready = lua.create_function(move |_, timer_id: u32| {
+        let is_timer_ready = lua.create_function(move |_, args: mlua::MultiValue| {
+            let timer_id = last_id(args);
             Ok(timers_clone.get(&timer_id).map(|&v| v == 0).unwrap_or(true))
         })?;
         table.set("IsTimerReady", is_timer_ready)?;
 
+        self.scope.write(lua, &table)?;
         Ok(table)
+    }
+}
+
+/// The id argument of a snapshot helper, whether it was called as
+/// `input:GetData(id)` (the table comes first) or `input.GetData(id)`.
+fn last_id(args: mlua::MultiValue) -> u32 {
+    match args.into_iter().last() {
+        Some(Value::Integer(n)) => n as u32,
+        Some(Value::Number(n)) => n as u32,
+        _ => 0,
     }
 }
 

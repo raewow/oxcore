@@ -11,11 +11,20 @@ use oxcore_shared::protocol::ObjectGuid;
 ///
 /// Open a locked door or chest.
 /// misc_value = lock ID
-pub async fn effect_open_lock(input: &EffectInput, _world: &World) -> Result<EffectResult> {
+pub async fn effect_open_lock(input: &EffectInput, world: &World) -> Result<EffectResult> {
     let lock_id = input.misc_value as u32;
     let Some(target_guid) = input.target_guid else {
         return Ok(EffectResult::empty());
     };
+
+    // Opening a battleground banner (or another scripted objective) is the
+    // scope's script's business, not a lock's.
+    if target_guid.is_game_object()
+        && input.caster_guid.is_player()
+        && crate::game::pvp::objective::on_gameobject_use(world, input.caster_guid, target_guid).await
+    {
+        return Ok(EffectResult::empty());
+    }
 
     tracing::debug!(
         "Open lock: caster={:?} target={:?} lock={}; loot follows SPELL_GO",

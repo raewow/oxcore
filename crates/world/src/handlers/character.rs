@@ -33,7 +33,7 @@ use oxcore_shared::messages::character::{
 };
 use oxcore_shared::messages::create::SmsgOutOfRange;
 use oxcore_shared::messages::login::{
-    CharacterEnumEntry, EquipmentSlot, SmsgBindPointUpdate, SmsgCharEnum, SmsgInitWorldStates,
+    CharacterEnumEntry, EquipmentSlot, SmsgBindPointUpdate, SmsgCharEnum,
     SmsgInitialSetup, SmsgInitializeFactionsEmpty, SmsgLoadCufProfiles, SmsgLoginSetTimeSpeed,
     SmsgLoginVerifyWorld, SmsgSetAllTaskProgress, SmsgSetRestStart, SmsgWorldServerInfo,
 };
@@ -1407,7 +1407,13 @@ pub async fn handle_player_login_with_guid(
     }
     info!("[LOGIN] 10/11 SMSG_UPDATE_OBJECT: 1 player block");
     // 11/11. SMSG_INIT_WORLD_STATES
-    let init_world_states = SmsgInitWorldStates::new(character_map, character_zone);
+    let character_instance = u32::try_from(character.instance).unwrap_or(0);
+    let init_world_states = crate::game::pvp::scope::init_world_states(
+        world,
+        character_map,
+        character_instance,
+        character_zone,
+    );
     session.send_msg(init_world_states)?;
     info!(
         "[LOGIN] 11/11 SMSG_INIT_WORLD_STATES: map={}, zone={}",
@@ -1437,6 +1443,11 @@ pub async fn handle_player_login_with_guid(
 
     // A journey interrupted by logging out carries on.
     crate::game::taxi::flight::resume(world, guid);
+
+    // Honour tab and rank; battleground queues waited in; enemy territory flags PvP.
+    crate::game::player::honor::load(world, guid).await;
+    crate::game::battleground::system::on_login(world, guid);
+    crate::game::pvp::flag::on_zone_change(world, guid, character_zone);
 
     // Clear login guard so session can be reused if player logs out and back in
     session.clear_login_in_progress();
@@ -2337,6 +2348,11 @@ async fn logout_persist_and_teardown(
     player_guid: ObjectGuid,
     save_context: &str,
 ) -> Result<()> {
+    // Leaving a battleground (as a deserter if it runs) moves the saved
+    // position back to where the player entered it.
+    crate::game::battleground::system::on_logout(world, player_guid).await;
+    crate::game::player::honor::save(world, player_guid).await;
+
     // Save auras before removing the player from systems.
     world.systems.auras.on_logout(player_guid, world).await?;
 
@@ -3099,6 +3115,21 @@ pub async fn handle_zoneupdate(
             old_zone, zone_id, player_guid, e
         );
     }
+
+    // The new zone's world states, and whether it keeps the player PvP flagged.
+    if let Some((map_id, instance_id)) = world
+        .managers
+        .player_mgr
+        .with_player(player_guid, |p| (p.map_id, p.instance_id))
+    {
+        session.send_msg(crate::game::pvp::scope::init_world_states(
+            world,
+            map_id,
+            instance_id,
+            zone_id,
+        ))?;
+    }
+    crate::game::pvp::flag::on_zone_change(world, player_guid, zone_id);
 
     // --- Update rest state based on zone flags ---
     // AREA_FLAG_CAPITAL (0x100): capital cities grant rest XP

@@ -162,6 +162,8 @@ pub struct CreatureAiTemplate {
     pub leash_range: f32,
     pub static_flags2: u32,
     pub civilian: bool,
+    /// Faction leaders worth a fixed honourable kill.
+    pub racial_leader: bool,
 }
 
 impl Default for CreatureAiTemplate {
@@ -175,6 +177,7 @@ impl Default for CreatureAiTemplate {
             leash_range: 0.0,
             static_flags2: 0,
             civilian: false,
+            racial_leader: false,
         }
     }
 }
@@ -554,6 +557,7 @@ impl CreatureManager {
                     leash_range: row.leash_range,
                     static_flags2,
                     civilian: row.civilian != 0,
+                    racial_leader: row.racial_leader != 0,
                 },
             };
             self.visuals.insert(

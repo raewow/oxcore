@@ -224,14 +224,21 @@ pub async fn handle_gossip_hello(
         (npc_flags & 0x00000080) != 0
     );
 
-    // Spirit guides send the battleground resurrection-wave timer when greeted.
+    // Spirit guides in a battleground: wait for the next resurrection wave.
     const NPC_FLAG_SPIRITGUIDE: u32 = 0x00000040;
     if (npc_flags & NPC_FLAG_SPIRITGUIDE) != 0 {
-        session.send_msg(oxcore_shared::messages::death::SmsgAreaSpiritHealerTime {
-            healer_guid: npc_guid,
-            time_left_ms: 0,
-        })?;
+        if let Some(time_left_ms) =
+            crate::game::battleground::system::spirit_healer_time(world, player_guid)
+        {
+            session.send_msg(oxcore_shared::messages::death::SmsgAreaSpiritHealerTime {
+                healer_guid: npc_guid,
+                time_left_ms,
+            })?;
+            crate::game::battleground::system::queue_for_wave(world, player_guid).await;
+            return Ok(());
+        }
     }
+
 
     // Spirit healer: NPC_FLAG_SPIRITHEALER = 0x20. When a dead ghost player
     // clicks a spirit healer, skip gossip and send SMSG_SPIRIT_HEALER_CONFIRM
@@ -515,6 +522,9 @@ pub async fn handle_gossip_select_option(
             gossip_option::TAXIVENDOR => {
                 // Learn this flight point, or open the flight map.
                 crate::game::taxi::flight::talk_to_flight_master(world, player_guid, npc_guid);
+            }
+            gossip_option::BATTLEFIELD => {
+                crate::game::battleground::system::battlemaster_hello(world, player_guid, npc_guid);
             }
             _ => {
                 // Other options are handled by the gossip system

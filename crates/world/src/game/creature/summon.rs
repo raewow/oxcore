@@ -349,6 +349,14 @@ pub fn hide_gameobject(world: &World, guid: ObjectGuid) {
     }
 }
 
+/// Remove a game object for good: out of view, out of the registry.
+pub fn delete_gameobject(world: &World, guid: ObjectGuid) {
+    hide_gameobject(world, guid);
+    temporary_gameobjects().remove(&guid);
+    world.systems.pool.on_object_despawned(guid);
+    world.managers.gameobject_mgr.remove_gameobject(guid);
+}
+
 /// Summon a temporary game object that disappears after `duration_secs`
 /// (0 keeps it until something removes it).
 pub fn summon_gameobject(

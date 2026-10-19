@@ -946,17 +946,41 @@ impl Opcode {
     pub const CMSG_BATTLEFIELD_LIST: Opcode = Opcode { vanilla: 0x023C, modern: 0x3182 }; // 572
     pub const SMSG_BATTLEFIELD_LIST: Opcode = Opcode { vanilla: 0x023D, modern: 0x2927 }; // 573
     pub const CMSG_BATTLEFIELD_JOIN: Opcode = Opcode { vanilla: 0x023E, ..Opcode::NONE }; // 574
-    pub const SMSG_BATTLEFIELD_JOINED: Opcode = Opcode { vanilla: 0x02E1, ..Opcode::NONE }; // 737
+    /// No such 1.12 opcode: `0x02E1` is [`Opcode::CMSG_LEAVE_BATTLEFIELD`].
+    pub const SMSG_BATTLEFIELD_JOINED: Opcode = Opcode { ..Opcode::NONE };
     /// No such 1.12 opcode: `0x02E2` is [`Opcode::CMSG_AREA_SPIRIT_HEALER_QUERY`].
     pub const SMSG_BATTLEFIELD_LEFT: Opcode = Opcode { ..Opcode::NONE };
-    pub const CMSG_LEAVE_BATTLEFIELD: Opcode = Opcode { vanilla: 0x02E5, ..Opcode::NONE }; // 741
+    pub const CMSG_LEAVE_BATTLEFIELD: Opcode = Opcode { vanilla: 0x02E1, modern: 0x3176 }; // 737
+    pub const SMSG_BATTLEFIELD_WIN: Opcode = Opcode { vanilla: 0x023F, ..Opcode::NONE }; // 575
+    pub const SMSG_BATTLEFIELD_LOSE: Opcode = Opcode { vanilla: 0x0240, ..Opcode::NONE }; // 576
+    /// 1.14 splits the status packet by state; vanilla sends all of them as
+    /// [`Opcode::SMSG_BATTLEFIELD_STATUS`].
+    pub const SMSG_BATTLEFIELD_STATUS_NEED_CONFIRMATION: Opcode = Opcode { modern: 0x2922, ..Opcode::NONE };
+    pub const SMSG_BATTLEFIELD_STATUS_ACTIVE: Opcode = Opcode { modern: 0x2923, ..Opcode::NONE };
+    pub const SMSG_BATTLEFIELD_STATUS_QUEUED: Opcode = Opcode { modern: 0x2924, ..Opcode::NONE };
+    pub const SMSG_BATTLEFIELD_STATUS_NONE: Opcode = Opcode { modern: 0x2925, ..Opcode::NONE };
+    pub const SMSG_BATTLEFIELD_STATUS_FAILED: Opcode = Opcode { modern: 0x2926, ..Opcode::NONE };
+    pub const CMSG_BATTLEMASTER_JOIN: Opcode = Opcode { vanilla: 0x02EE, modern: 0x351F }; // 750
+    /// The 1.14 request is `CMSG_PVP_LOG_DATA`; its reply is [`Opcode::SMSG_PVP_MATCH_STATISTICS`].
+    pub const MSG_PVP_LOG_DATA: Opcode = Opcode { vanilla: 0x02E0, modern: 0x317F }; // 736
+    pub const SMSG_PVP_MATCH_STATISTICS: Opcode = Opcode { modern: 0x2933, ..Opcode::NONE };
+    pub const SMSG_GROUP_JOINED_BATTLEGROUND: Opcode = Opcode { vanilla: 0x02E8, ..Opcode::NONE }; // 744
+    /// Vanilla asks for positions; 1.14 is sent [`Opcode::SMSG_BATTLEGROUND_PLAYER_POSITIONS`].
+    pub const MSG_BATTLEGROUND_PLAYER_POSITIONS: Opcode = Opcode { vanilla: 0x02E9, ..Opcode::NONE }; // 745
+    pub const SMSG_BATTLEGROUND_PLAYER_POSITIONS: Opcode = Opcode { modern: 0x2928, ..Opcode::NONE };
+    pub const SMSG_BATTLEGROUND_PLAYER_JOINED: Opcode = Opcode { vanilla: 0x02EC, modern: 0x292B }; // 748
+    pub const SMSG_BATTLEGROUND_PLAYER_LEFT: Opcode = Opcode { vanilla: 0x02ED, modern: 0x292C }; // 749
+    pub const SMSG_PVP_CREDIT: Opcode = Opcode { vanilla: 0x028C, modern: 0x2948 }; // 652
+    pub const SMSG_UPDATE_WORLD_STATE: Opcode = Opcode { vanilla: 0x02C3, modern: 0x273F }; // 707
     pub const CMSG_BATTLEFIELD_PORT: Opcode = Opcode { vanilla: 0x02D5, modern: 0x3524 }; // 725
     pub const CMSG_BATTLEMASTER_HELLO: Opcode = Opcode { vanilla: 0x02D7, modern: 0x32A9 }; // 727
     /// No such 1.12 opcode: `0x02E3` is [`Opcode::CMSG_AREA_SPIRIT_HEALER_QUEUE`].
     pub const SMSG_BATTLEMASTER_JOINED: Opcode = Opcode { ..Opcode::NONE };
     /// No such 1.12 opcode: `0x023D` is [`Opcode::SMSG_BATTLEFIELD_LIST`].
     pub const CMSG_BATTLEFIELD_QUEUE: Opcode = Opcode { ..Opcode::NONE };
-    pub const CMSG_BATTLEFIELD_UN_QUEUE: Opcode = Opcode { vanilla: 0x023F, ..Opcode::NONE }; // 575
+    /// No such 1.12 opcode: leaving a queue is [`Opcode::CMSG_BATTLEFIELD_PORT`] with action 0, and
+    /// `0x023F` is [`Opcode::SMSG_BATTLEFIELD_WIN`].
+    pub const CMSG_BATTLEFIELD_UN_QUEUE: Opcode = Opcode { ..Opcode::NONE };
     pub const CMSG_AREA_SPIRIT_HEALER_QUERY: Opcode = Opcode { vanilla: 0x02E2, modern: 0x34B0 }; // 738
     pub const CMSG_AREA_SPIRIT_HEALER_QUEUE: Opcode = Opcode { vanilla: 0x02E3, modern: 0x34B1 }; // 739
     pub const SMSG_AREA_SPIRIT_HEALER_TIME: Opcode = Opcode { vanilla: 0x02E4, modern: 0x2737 }; // 740
@@ -1059,6 +1083,8 @@ impl Opcode {
     // ============================================================================
 
     pub const CMSG_TOGGLE_PVP: Opcode = Opcode { vanilla: 0x0253, modern: 0x32A3 }; // 595
+    /// 1.14 only: sets the PvP preference explicitly (vanilla sends `CMSG_TOGGLE_PVP` with a byte).
+    pub const CMSG_SET_PVP: Opcode = Opcode { modern: 0x32A4, ..Opcode::NONE };
 
     // ============================================================================
     // Summon
@@ -2181,6 +2207,50 @@ pub const ALL: &[(Opcode, &str)] = &[
     (Opcode::SMSG_BATTLEFIELD_JOINED, "SMSG_BATTLEFIELD_JOINED"),
     (Opcode::SMSG_BATTLEFIELD_LEFT, "SMSG_BATTLEFIELD_LEFT"),
     (Opcode::CMSG_LEAVE_BATTLEFIELD, "CMSG_LEAVE_BATTLEFIELD"),
+    (Opcode::SMSG_BATTLEFIELD_WIN, "SMSG_BATTLEFIELD_WIN"),
+    (Opcode::SMSG_BATTLEFIELD_LOSE, "SMSG_BATTLEFIELD_LOSE"),
+    (
+        Opcode::SMSG_BATTLEFIELD_STATUS_NEED_CONFIRMATION,
+        "SMSG_BATTLEFIELD_STATUS_NEED_CONFIRMATION",
+    ),
+    (
+        Opcode::SMSG_BATTLEFIELD_STATUS_ACTIVE,
+        "SMSG_BATTLEFIELD_STATUS_ACTIVE",
+    ),
+    (
+        Opcode::SMSG_BATTLEFIELD_STATUS_QUEUED,
+        "SMSG_BATTLEFIELD_STATUS_QUEUED",
+    ),
+    (Opcode::SMSG_BATTLEFIELD_STATUS_NONE, "SMSG_BATTLEFIELD_STATUS_NONE"),
+    (
+        Opcode::SMSG_BATTLEFIELD_STATUS_FAILED,
+        "SMSG_BATTLEFIELD_STATUS_FAILED",
+    ),
+    (Opcode::CMSG_BATTLEMASTER_JOIN, "CMSG_BATTLEMASTER_JOIN"),
+    (Opcode::MSG_PVP_LOG_DATA, "MSG_PVP_LOG_DATA"),
+    (Opcode::SMSG_PVP_MATCH_STATISTICS, "SMSG_PVP_MATCH_STATISTICS"),
+    (
+        Opcode::SMSG_GROUP_JOINED_BATTLEGROUND,
+        "SMSG_GROUP_JOINED_BATTLEGROUND",
+    ),
+    (
+        Opcode::MSG_BATTLEGROUND_PLAYER_POSITIONS,
+        "MSG_BATTLEGROUND_PLAYER_POSITIONS",
+    ),
+    (
+        Opcode::SMSG_BATTLEGROUND_PLAYER_POSITIONS,
+        "SMSG_BATTLEGROUND_PLAYER_POSITIONS",
+    ),
+    (
+        Opcode::SMSG_BATTLEGROUND_PLAYER_JOINED,
+        "SMSG_BATTLEGROUND_PLAYER_JOINED",
+    ),
+    (
+        Opcode::SMSG_BATTLEGROUND_PLAYER_LEFT,
+        "SMSG_BATTLEGROUND_PLAYER_LEFT",
+    ),
+    (Opcode::SMSG_PVP_CREDIT, "SMSG_PVP_CREDIT"),
+    (Opcode::SMSG_UPDATE_WORLD_STATE, "SMSG_UPDATE_WORLD_STATE"),
     (Opcode::CMSG_BATTLEFIELD_PORT, "CMSG_BATTLEFIELD_PORT"),
     (Opcode::CMSG_BATTLEMASTER_HELLO, "CMSG_BATTLEMASTER_HELLO"),
     (Opcode::SMSG_BATTLEMASTER_JOINED, "SMSG_BATTLEMASTER_JOINED"),
@@ -2291,6 +2361,7 @@ pub const ALL: &[(Opcode, &str)] = &[
     ),
     (Opcode::CMSG_GMSURVEY_SUBMIT, "CMSG_GMSURVEY_SUBMIT"),
     (Opcode::CMSG_TOGGLE_PVP, "CMSG_TOGGLE_PVP"),
+    (Opcode::CMSG_SET_PVP, "CMSG_SET_PVP"),
     (Opcode::SMSG_SUMMON_REQUEST, "SMSG_SUMMON_REQUEST"),
     (Opcode::CMSG_SUMMON_RESPONSE, "CMSG_SUMMON_RESPONSE"),
     (Opcode::CMSG_FAR_SIGHT, "CMSG_FAR_SIGHT"),
@@ -2599,8 +2670,8 @@ mod tests {
         // duplicate check would silently start passing on an empty set.
         assert_eq!(
             declared_opcodes().len(),
-            687,
-            "expected 687 opcode constants; update this count deliberately when adding opcodes"
+            705,
+            "expected 705 opcode constants; update this count deliberately when adding opcodes"
         );
     }
 

@@ -54,6 +54,7 @@ pub fn is_player_in_battleground(world: &World, player_guid: ObjectGuid) -> bool
         .with_player(player_guid, |p| p.map_id)
         .unwrap_or(0);
     BATTLEGROUND_MAP_IDS.contains(&map_id)
+        || crate::game::battleground::system::match_of(world, player_guid).is_some()
 }
 
 /// MovementFlags::WATERWALKING — matches `shared::protocol::movement::MoveFlags::WATERWALKING`.
@@ -268,18 +269,22 @@ impl DeathSystem {
 
         info!("Player {:?} killed by {:?}", player_guid, killer_guid);
 
-        // 13. Award honor for PvP kill credit. Reward logic is async + may
-        // touch the DB, so we spawn a task rather than blocking the tick.
-        if is_pvp_death {
+        // 13. The battleground scoreboard counts the death; objective scripts
+        // (flag drops) hear of it; enemies share the honour of a PvP death.
+        crate::game::battleground::system::on_player_killed(world, player_guid, killer_guid);
+        {
             let world_clone = world.clone();
             let victim = player_guid;
             let killer = killer_guid;
             tokio::spawn(async move {
-                world_clone
-                    .systems
-                    .honor
-                    .reward_honor_on_death(victim, killer, &world_clone)
-                    .await;
+                crate::game::pvp::objective::on_player_death(&world_clone, victim, killer).await;
+                if is_pvp_death {
+                    world_clone
+                        .systems
+                        .honor
+                        .reward_honor_on_death(victim, killer, &world_clone)
+                        .await;
+                }
             });
         }
 
@@ -518,6 +523,11 @@ impl DeathSystem {
     }
 
     /// Handle spirit healer activation
+    /// Bring a dead player in a battleground back where they stand, at full health.
+    pub fn resurrect_in_battleground(&self, player_guid: ObjectGuid, world: &World) -> Result<()> {
+        self.resurrect_player(player_guid, ResurrectionMethod::Battleground, world)
+    }
+
     pub fn handle_spirit_healer(&self, player_guid: ObjectGuid, world: &World) -> Result<()> {
         // Validate player is in ghost form
         let is_ghost = world
@@ -762,6 +772,12 @@ impl DeathSystem {
         race: u8,
         world: &World,
     ) -> Result<()> {
+        // In a battleground the match (its script) may pick the graveyard.
+        if let Some((gy_map, gy_pos)) = crate::game::battleground::system::graveyard_for(world, player_guid) {
+            self.perform_ghost_teleport(player_guid, gy_map, gy_pos, world)?;
+            return Ok(());
+        }
+
         let team = graveyard::team_from_race(race);
 
         // Look up closest graveyard
@@ -984,10 +1000,9 @@ impl DeathSystem {
                         );
                         (h, m, None, None)
                     }
-                    ResurrectionMethod::Battleground => {
-                        // Not yet implemented (mass-resurrect wave, Phase 8).
-                        (max_health / 2, max_mana / 2, None, None)
-                    }
+                    // Battlegrounds bring players back at full strength (spirit
+                    // guide waves, leaving, the match ending).
+                    ResurrectionMethod::Battleground => (max_health, max_mana, None, None),
                 };
 
                 // Set health and mana. Reset rage and restore energy proportionally.

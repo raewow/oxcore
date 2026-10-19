@@ -1,5 +1,6 @@
 pub mod area_trigger;
 pub mod auction;
+pub mod battleground;
 pub mod broadcast_mgr;
 pub mod chat;
 pub mod combat;
@@ -23,6 +24,7 @@ pub mod map_update;
 pub mod npc;
 pub mod pet;
 pub mod player;
+pub mod pvp;
 pub mod social;
 pub mod spell;
 pub mod system_mgr;

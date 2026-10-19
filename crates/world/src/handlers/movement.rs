@@ -275,7 +275,7 @@ pub async fn handle_worldport_ack(
 
     // Send initialization packets (critical for client to exit loading screen)
     use oxcore_shared::messages::login::{
-        SmsgBindPointUpdate, SmsgInitWorldStates, SmsgSetRestStart,
+        SmsgBindPointUpdate, SmsgSetRestStart,
     };
 
     info!("[WORLDPORT-ACK] Sending initialization packets...");
@@ -371,7 +371,12 @@ pub async fn handle_worldport_ack(
         "[WORLDPORT-ACK] Sending SMSG_INIT_WORLD_STATES (map={} zone={}) - CRITICAL PACKET...",
         dest_map, zone
     );
-    session.send_msg(SmsgInitWorldStates::new(dest_map, zone))?;
+    session.send_msg(crate::game::pvp::scope::init_world_states(
+        world,
+        dest_map,
+        dest_instance_id,
+        zone,
+    ))?;
     info!("[WORLDPORT-ACK] ✓ SMSG_INIT_WORLD_STATES sent - client should exit loading screen now");
 
     // Force immediate visibility update to send nearby creatures/objects
@@ -452,6 +457,10 @@ pub async fn handle_worldport_ack(
             .await?;
     }
     crate::game::player::teleport::resummon_pet(world, player_guid);
+
+    // A player arriving in their battleground joins the match.
+    crate::game::battleground::system::on_player_arrived(world, player_guid, dest_map, dest_instance_id)
+        .await;
 
     // A ghost entering the dungeon that holds their corpse comes back to life.
     if dest_instance_id != 0 {

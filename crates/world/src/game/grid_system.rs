@@ -237,6 +237,17 @@ impl GridSystem {
                 continue;
             }
 
+            // Battleground spawns follow their copy's active events.
+            if !crate::game::pvp::events::is_spawn_allowed(
+                world,
+                map_id,
+                map.instance_id(),
+                crate::game::game_event::EventSpawnKind::Creature,
+                spawn.spawn_id,
+            ) {
+                continue;
+            }
+
             let spawned = world.managers.creature_mgr.spawn_into_map(
                 &spawn,
                 map,
@@ -291,6 +302,16 @@ impl GridSystem {
             }
 
             if !world.managers.game_event_mgr.is_spawn_eligible(
+                crate::game::game_event::EventSpawnKind::GameObject,
+                go_spawn.spawn_id,
+            ) {
+                continue;
+            }
+
+            if !crate::game::pvp::events::is_spawn_allowed(
+                world,
+                map_id,
+                map.instance_id(),
                 crate::game::game_event::EventSpawnKind::GameObject,
                 go_spawn.spawn_id,
             ) {

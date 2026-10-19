@@ -67,6 +67,12 @@ pub struct Player {
     pub summon_offer: Option<SummonOffer>,
     /// Known flight points and the journey in progress.
     pub taxi: crate::game::taxi::PlayerTaxi,
+    /// What keeps the PvP flag up.
+    pub pvp: crate::game::pvp::PvpState,
+    /// Battleground queues and the match the player belongs to.
+    pub battleground: crate::game::battleground::PlayerBattleground,
+    /// Honour: kills, contribution points and rank.
+    pub honor: crate::game::player::honor::HonorState,
     /// Aura state (buffs/debuffs, slot management)
     pub auras: AuraState,
     /// Death state (death/resurrection state machine)
@@ -246,6 +252,9 @@ impl Player {
             teleport_unsummoned_pet: None,
             summon_offer: None,
             taxi: Default::default(),
+            pvp: Default::default(),
+            battleground: Default::default(),
+            honor: Default::default(),
             auras: AuraState::default(),
             death: DeathSystemState::default(),
             spells: SpellsState::default(),

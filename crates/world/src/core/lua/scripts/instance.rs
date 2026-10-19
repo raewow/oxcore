@@ -43,16 +43,28 @@ impl LuaInstanceAI {
     }
 
     /// Call OnCreatureDeath callback - when a creature dies in the instance.
+    /// `killer` is who struck the killing blow (if anyone); `event` the
+    /// battleground spawn event the creature belongs to (255, 255 when none).
     pub fn on_creature_death(
         &self,
         lua: &Lua,
         snapshot: &InstanceSnapshot,
         creature_entry: u32,
         creature_guid: ObjectGuid,
+        killer: Option<ObjectGuid>,
+        event: (u8, u8),
     ) -> Vec<LuaAction> {
         self.call_callback_with_extra(lua, "OnCreatureDeath", snapshot, |_lua, table, input| {
             let func: Function = table.get("OnCreatureDeath")?;
-            func.call((table.clone(), input, creature_entry, LuaGuid(creature_guid)))
+            func.call((
+                table.clone(),
+                input,
+                creature_entry,
+                LuaGuid(creature_guid),
+                killer.map(LuaGuid),
+                event.0,
+                event.1,
+            ))
         })
     }
 
@@ -287,6 +299,8 @@ impl InstanceScriptState {
             data: self.data.clone(),
             guids: self.guids.clone(),
             timers: self.timers.clone(),
+            diff_ms: 0,
+            scope: Default::default(),
         }
     }
 }

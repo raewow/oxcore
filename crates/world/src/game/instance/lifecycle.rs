@@ -131,6 +131,13 @@ pub async fn resolve_transfer_instance(
     player_guid: ObjectGuid,
     dest_map: u32,
 ) -> Result<u32, InstanceEntryError> {
+    // A battleground map: the copy of the player's match.
+    if map_entry(world, dest_map).is_some_and(|e| e.is_battleground()) {
+        return Ok(
+            crate::game::battleground::system::transfer_instance(world, player_guid, dest_map)
+                .unwrap_or(0),
+        );
+    }
     let Some(entry) = map_entry(world, dest_map).filter(MapEntry::is_dungeon) else {
         return Ok(0);
     };
@@ -269,13 +276,20 @@ pub async fn on_creature_killed(
         );
     }
 
+    if is_battleground {
+        if instance_id != 0 {
+            super::scripts::on_creature_death(world, map_id, instance_id, entry, creature, killer, spawn_id)
+                .await;
+        }
+        return;
+    }
     let Some(map) = map.filter(MapEntry::is_dungeon) else {
         return;
     };
     if instance_id == 0 {
         return;
     }
-    super::scripts::on_creature_death(world, map_id, instance_id, entry, creature).await;
+    super::scripts::on_creature_death(world, map_id, instance_id, entry, creature, killer, spawn_id).await;
     let instance_mgr = &world.managers.instance_mgr;
 
     if map.is_non_raid_dungeon() {
@@ -551,6 +565,14 @@ pub async fn validate_login_location(
     let Some(entry) = map_entry(world, map_id) else {
         return (map_id, instance_id, position);
     };
+    // A battleground match does not survive a logout: the player wakes up
+    // where they entered it.
+    if entry.is_battleground() {
+        let (map, position) = crate::game::battleground::system::take_login_entry_point(world, player_guid)
+            .await
+            .unwrap_or(homebind);
+        return (map, 0, position);
+    }
     if !entry.is_dungeon() {
         return (map_id, 0, position);
     }

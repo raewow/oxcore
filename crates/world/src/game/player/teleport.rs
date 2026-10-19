@@ -77,8 +77,24 @@ pub async fn teleport_to(
     // Battlegrounds are only entered through their queue, which assigns the
     // player to a match; nothing else may send a player there. Moves inside
     // the battleground they are in are fine.
-    if entry.is_battleground() && current_map != map_id {
+    if entry.is_battleground()
+        && current_map != map_id
+        && crate::game::battleground::system::transfer_instance(world, player_guid, map_id).is_none()
+    {
         return Ok(false);
+    }
+    // Leaving a battleground's map for anywhere else leaves the match.
+    if current_map != map_id {
+        if let Some(instance_id) = crate::game::battleground::system::match_of(world, player_guid) {
+            let leaving = world
+                .managers
+                .battleground_mgr
+                .with_match(instance_id, |m| m.map_id == current_map && m.map_id != map_id)
+                .unwrap_or(false);
+            if leaving {
+                crate::game::battleground::system::leave_battleground(world, player_guid, false).await;
+            }
+        }
     }
 
     let near = current_map == map_id && options & options::FORCE_MAP_CHANGE == 0;

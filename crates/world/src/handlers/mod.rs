@@ -11,6 +11,7 @@ pub mod addon;
 pub mod area_trigger;
 pub mod auction;
 pub mod auth;
+pub mod battleground;
 pub mod character;
 pub mod character_create_items;
 pub mod chat;
@@ -369,7 +370,6 @@ pub async fn dispatch_packet(
                 | Opcode::CMSG_CHAT_UNREGISTER_ALL_ADDON_PREFIXES
                 | Opcode::CMSG_QUERY_COUNTDOWN_TIMER
                 | Opcode::CMSG_REQUEST_CEMETERY_LIST
-                | Opcode::CMSG_REQUEST_BATTLEFIELD_STATUS
                 | Opcode::CMSG_LFG_LIST_GET_STATUS
                 | Opcode::CMSG_BATTLE_PET_REQUEST_JOURNAL
                 | Opcode::CMSG_ARENA_TEAM_ACCEPT
@@ -963,13 +963,39 @@ pub async fn dispatch_packet(
                     taxi::handle_activate_taxi_express(session, packet, world).await?;
                 }
 
-                // Stubs for systems not yet in v2
-                Opcode::CMSG_BATTLEFIELD_STATUS => {
-                    // No battleground system - send empty status
-                    let mut response = WorldPacket::new(Opcode::SMSG_BATTLEFIELD_STATUS);
-                    response.write_u32(0); // queue slot
-                    response.write_u32(0); // map (0 = no BG)
-                    session.send_packet_protocol_agnostic(response)?;
+                // Battlegrounds and PvP
+                Opcode::CMSG_BATTLEFIELD_STATUS | Opcode::CMSG_REQUEST_BATTLEFIELD_STATUS => {
+                    battleground::handle_battlefield_status(session, world)?;
+                }
+                Opcode::CMSG_BATTLEMASTER_HELLO => {
+                    battleground::handle_battlemaster_hello(session, packet, world)?;
+                }
+                Opcode::CMSG_BATTLEFIELD_LIST => {
+                    battleground::handle_battlefield_list(session, packet, world)?;
+                }
+                Opcode::CMSG_BATTLEMASTER_JOIN => {
+                    battleground::handle_battlemaster_join(session, packet, world)?;
+                }
+                Opcode::CMSG_BATTLEFIELD_JOIN => {
+                    battleground::handle_battlefield_join(session, packet, world)?;
+                }
+                Opcode::CMSG_BATTLEFIELD_PORT => {
+                    battleground::handle_battlefield_port(session, packet, world).await?;
+                }
+                Opcode::CMSG_LEAVE_BATTLEFIELD => {
+                    battleground::handle_leave_battlefield(session, packet, world).await?;
+                }
+                Opcode::MSG_PVP_LOG_DATA => {
+                    battleground::handle_pvp_log_data(session, world)?;
+                }
+                Opcode::MSG_BATTLEGROUND_PLAYER_POSITIONS => {
+                    battleground::handle_player_positions(session, world)?;
+                }
+                Opcode::CMSG_TOGGLE_PVP => {
+                    battleground::handle_toggle_pvp(session, packet, world)?;
+                }
+                Opcode::CMSG_SET_PVP => {
+                    battleground::handle_set_pvp(session, packet, world)?;
                 }
                 Opcode::CMSG_MEETINGSTONE_INFO => {
                     // No LFG system - send "not in queue"

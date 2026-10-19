@@ -472,14 +472,31 @@ fn reputation_discount(world: &World, player_guid: ObjectGuid, npc: ObjectGuid) 
     else {
         return 1.0;
     };
-    match world
+    let mut discount = match world
         .systems
         .reputation
         .get_rank(player_guid, faction, world)
     {
         Some(rank) if rank >= ReputationRank::Honored => 0.9,
         _ => 1.0,
+    };
+    // Capital cities' flight masters also reward PvP rank: 5% from Corporal
+    // (visual rank 2), 10% from Master Sergeant (4).
+    const CAPITAL_FACTIONS: [u32; 10] = [72, 47, 54, 69, 730, 68, 76, 81, 530, 729];
+    if CAPITAL_FACTIONS.contains(&faction) {
+        let visual_rank = world
+            .managers
+            .player_mgr
+            .with_player(player_guid, |p| p.honor.rank.visual_rank)
+            .unwrap_or(0);
+        if visual_rank >= 2 {
+            discount -= 0.05;
+        }
+        if visual_rank >= 4 {
+            discount -= 0.05;
+        }
     }
+    discount
 }
 
 /// Mount up, take control away and send the flight spline over `points`.

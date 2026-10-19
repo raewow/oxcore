@@ -37,7 +37,7 @@ impl CreatureRepository {
                        spell_list_id::BIGINT AS spell_list_id,
                        detection_range::REAL AS detection_range,
                        call_for_help_range::REAL AS call_for_help_range,
-                       leash_range::REAL AS leash_range, civilian::BIGINT AS civilian
+                       leash_range::REAL AS leash_range, civilian::BIGINT AS civilian, racial_leader::BIGINT AS racial_leader
                FROM world.creature_template
                WHERE patch = 0"#,
         )

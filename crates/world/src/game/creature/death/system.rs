@@ -232,6 +232,17 @@ async fn process_creature_death(world: &World, guid: ObjectGuid) -> anyhow::Resu
         }
     }
 
+    // Faction leaders are honourable kills; gray civilians dishonourable ones.
+    if let Some(recipient_guid) = loot_recipient.filter(|g| g.is_player()) {
+        let level = world
+            .managers
+            .creature_mgr
+            .get_template(entry)
+            .map(|t| u32::from(t.max_level))
+            .unwrap_or(0);
+        crate::game::player::honor::on_creature_killed(world, recipient_guid, guid, entry, level);
+    }
+
     // Generate loot and mark as lootable if has loot recipient
     if let Some(recipient_guid) = loot_recipient {
         tracing::info!(

@@ -362,6 +362,179 @@ pub async fn execute_pending_attack_vs_creature(
     Ok(target_died)
 }
 
+/// Resolve one player's melee swing at another player.
+///
+/// Only a PvP-flagged enemy may be hit. Returns `true` when the swing should
+/// end the auto-attack (target dead, gone or not attackable).
+pub async fn execute_pending_attack_vs_player(
+    world: &World,
+    attacker_guid: ObjectGuid,
+    target_guid: ObjectGuid,
+) -> anyhow::Result<bool> {
+    use crate::game::common::unit_flags;
+
+    if !world.managers.player_mgr.is_player_alive(target_guid) {
+        let dead_packet = oxcore_shared::protocol::WorldPacket::new(
+            oxcore_shared::protocol::Opcode::SMSG_ATTACKSWING_DEADTARGET,
+        );
+        world
+            .managers
+            .broadcast_mgr
+            .send_msg_to_player(attacker_guid, dead_packet);
+        send_attack_stop(world, attacker_guid, target_guid, true);
+        return Ok(true);
+    }
+    let attackable = {
+        let mgr = &world.managers.player_mgr;
+        let attacker_team = mgr.with_player(attacker_guid, |p| p.get_team());
+        let target = mgr.with_player(target_guid, |p| (p.get_team(), p.unit_flags & unit_flags::PVP != 0));
+        matches!((attacker_team, target), (Some(a), Some((t, flagged))) if a != t && flagged)
+    };
+    if !attackable {
+        send_attack_stop(world, attacker_guid, target_guid, false);
+        return Ok(true);
+    }
+
+    world
+        .systems
+        .combat
+        .enter_combat(attacker_guid, target_guid, &world.managers.player_mgr);
+    world
+        .systems
+        .combat
+        .enter_combat(target_guid, attacker_guid, &world.managers.player_mgr);
+
+    let Some((attacker_level, weapon_min, weapon_max, weapon_speed, crit, ap, dual)) =
+        world.managers.player_mgr.with_player(attacker_guid, |p| {
+            let min = if p.combat.main_hand_min_dmg <= 1.0 {
+                5.0 + p.level as f32 * 2.0
+            } else {
+                p.combat.main_hand_min_dmg
+            };
+            let max = if p.combat.main_hand_max_dmg <= 2.0 {
+                10.0 + p.level as f32 * 3.0
+            } else {
+                p.combat.main_hand_max_dmg
+            };
+            (
+                p.level,
+                min,
+                max,
+                p.combat.main_hand_speed,
+                p.stats.melee_crit_pct,
+                p.stats.melee_attack_power,
+                p.combat.can_dual_wield,
+            )
+        })
+    else {
+        return Ok(true);
+    };
+    let Some(snapshot) = world.managers.player_mgr.with_player(target_guid, |p| CombatSnapshot {
+        attacker_level,
+        attacker_weapon_skill: attacker_level as u16 * 5,
+        attacker_hit_bonus: 0.0,
+        attacker_crit_chance: crit,
+        attacker_ap: ap,
+        is_dual_wielding: dual,
+        defender_level: p.level,
+        defender_defense_skill: p.level as u16 * 5,
+        defender_dodge_chance: p.stats.dodge_pct,
+        defender_parry_chance: p.stats.parry_pct,
+        defender_block_chance: p.stats.block_pct,
+        defender_block_value: p.stats.block_value,
+        defender_armor: p.stats.armor,
+        defender_is_player: true,
+        defender_can_parry: p.combat.can_parry,
+        defender_can_block: p.combat.can_block,
+        hand: AttackHand::MainHand,
+        is_ranged: false,
+    }) else {
+        return Ok(true);
+    };
+
+    let hit_outcome = calculate_hit_table(&snapshot);
+    let damage_result =
+        calculate_melee_damage(&snapshot, hit_outcome, weapon_min, weapon_max, weapon_speed);
+    let (damage, _absorbed) = world
+        .systems
+        .auras
+        .absorb_damage(target_guid, damage_result.damage, 0, world)
+        .await
+        .unwrap_or((damage_result.damage, 0));
+
+    let died = world
+        .managers
+        .player_mgr
+        .with_player_mut(target_guid, |p| {
+            let before = p.stats.health;
+            p.apply_damage(damage);
+            before > 0 && p.stats.health == 0
+        })
+        .unwrap_or(false);
+
+    world
+        .systems
+        .honor
+        .record_damage(attacker_guid, target_guid, damage, world);
+    crate::game::pvp::flag::on_player_damaged_player(world, attacker_guid, target_guid);
+
+    send_attacker_state_update(
+        world,
+        attacker_guid,
+        target_guid,
+        damage,
+        hit_outcome,
+        damage_result.blocked,
+        died,
+    )?;
+    reward_attacker_rage_if_actual_damage(damage, |damage| {
+        world.systems.power.on_damage_dealt(attacker_guid, damage, world)
+    })?;
+    if damage > 0 {
+        let _ = world.systems.power.on_damage_taken(target_guid, damage, world);
+    }
+
+    if let Some(health) = world.managers.player_mgr.with_player(target_guid, |p| p.stats.health) {
+        let update = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(
+            ValuesUpdateBlock::new(WorldObjectGuid::new_player(target_guid.counter()), ObjectType::Player)
+                .set_field(UNIT_FIELD_HEALTH, health),
+        ));
+        world
+            .managers
+            .broadcast_mgr
+            .broadcast_msg_nearby(target_guid, &update, true);
+    }
+
+    {
+        use crate::game::player::auras::proc::proc_flags;
+        let _ = world
+            .systems
+            .auras
+            .check_procs(
+                attacker_guid,
+                proc_flags::DEAL_MELEE_SWING | proc_flags::MAIN_HAND_WEAPON_SWING,
+                melee_swing_proc_ex(hit_outcome),
+                None,
+                damage,
+                world,
+            )
+            .await;
+    }
+
+    if died {
+        send_attack_stop(world, attacker_guid, target_guid, true);
+        if let Err(e) = world
+            .systems
+            .death
+            .on_killed(target_guid, Some(attacker_guid), None, world)
+        {
+            tracing::error!("Failed to handle player death: {}", e);
+        }
+        return Ok(true);
+    }
+    Ok(false)
+}
+
 fn reward_attacker_rage_if_actual_damage<F>(actual_damage: u32, mut reward: F) -> anyhow::Result<()>
 where
     F: FnMut(u32) -> anyhow::Result<()>,

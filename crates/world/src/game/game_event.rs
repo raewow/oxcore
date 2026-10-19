@@ -358,55 +358,91 @@ fn update_creature(world: &World, spawn_id: u32, eligible: bool) {
     for instance_id in loaded_copies_at(world, spawn.map_id, spawn.position) {
         let present = creature_mgr.has_spawn(spawn.map_id, instance_id, spawn_id);
         if eligible && !present {
-            if !world.systems.pool.can_creature_spawn(spawn_id, instance_id) {
-                continue;
-            }
-            let map = world
-                .managers
-                .map_mgr
-                .get_or_create_map(spawn.map_id, instance_id);
-            let Some(guid) =
-                creature_mgr.spawn_into_map(&spawn, &map, Some(&world.managers.waypoint_mgr))
-            else {
-                continue;
-            };
-            if spawn.spawn_flags & crate::game::creature::spawn::spawn_flags::ACTIVE != 0 {
-                map.add_to_active(guid, spawn.position);
-            }
-            world
-                .systems
-                .pool
-                .on_creature_spawned(spawn_id, instance_id, guid);
-            if let Some(create) = creature_mgr.build_create_msg(guid, world) {
-                for player in players_near(world, spawn.map_id, instance_id, spawn.position) {
-                    world
-                        .managers
-                        .broadcast_mgr
-                        .send_msg_to_player(player, create.clone());
-                }
-            }
+            spawn_creature_in_copy(world, spawn_id, instance_id);
         } else if !eligible && present {
-            let guids: Vec<ObjectGuid> = creature_mgr
-                .creatures_in_copy(spawn.map_id, instance_id)
-                .into_iter()
-                .filter(|&guid| creature_mgr.get_spawn_id(guid) == Some(spawn_id))
-                .collect();
-            for guid in guids {
-                let position = creature_mgr.get_position(guid).unwrap_or(spawn.position);
-                if let Some(map) = world.managers.map_mgr.get_map(spawn.map_id, instance_id) {
-                    map.remove_creature(guid, position);
-                    map.remove_from_active(guid);
-                }
-                let viewers = players_near(world, spawn.map_id, instance_id, position);
-                world
-                    .managers
-                    .broadcast_mgr
-                    .broadcast_msg_to_players(&viewers, &SmsgDestroyObject { guid });
-                world.systems.loot.remove_loot(guid);
-                world.systems.pool.on_object_despawned(guid);
-                creature_mgr.remove_creature(guid);
-            }
+            despawn_creature_in_copy(world, spawn_id, instance_id);
         }
+    }
+}
+
+/// Whether the grid holding `position` is loaded in a copy.
+pub(crate) fn is_grid_loaded(world: &World, map_id: u32, instance_id: u32, position: Position) -> bool {
+    use crate::map::grid_coords::world_to_grid;
+    let (gx, gy) = world_to_grid(position.x, position.y);
+    world
+        .managers
+        .map_mgr
+        .get_map(map_id, instance_id)
+        .is_some_and(|m| {
+            m.grid_manager()
+                .read()
+                .get_grid(gx, gy)
+                .is_some_and(|g| g.state().is_loaded())
+        })
+}
+
+/// Spawn a database creature into one copy and show it to nearby players.
+pub(crate) fn spawn_creature_in_copy(
+    world: &World,
+    spawn_id: u32,
+    instance_id: u32,
+) -> Option<ObjectGuid> {
+    let creature_mgr = &world.managers.creature_mgr;
+    let spawn = creature_mgr.get_spawn_data_by_id(spawn_id)?;
+    if creature_mgr.has_spawn(spawn.map_id, instance_id, spawn_id) {
+        return None;
+    }
+    if !world.systems.pool.can_creature_spawn(spawn_id, instance_id) {
+        return None;
+    }
+    let map = world
+        .managers
+        .map_mgr
+        .get_or_create_map(spawn.map_id, instance_id);
+    let guid = creature_mgr.spawn_into_map(&spawn, &map, Some(&world.managers.waypoint_mgr))?;
+    if spawn.spawn_flags & crate::game::creature::spawn::spawn_flags::ACTIVE != 0 {
+        map.add_to_active(guid, spawn.position);
+    }
+    world
+        .systems
+        .pool
+        .on_creature_spawned(spawn_id, instance_id, guid);
+    if let Some(create) = creature_mgr.build_create_msg(guid, world) {
+        for player in players_near(world, spawn.map_id, instance_id, spawn.position) {
+            world
+                .managers
+                .broadcast_mgr
+                .send_msg_to_player(player, create.clone());
+        }
+    }
+    Some(guid)
+}
+
+/// Remove a database creature from one copy.
+pub(crate) fn despawn_creature_in_copy(world: &World, spawn_id: u32, instance_id: u32) {
+    let creature_mgr = &world.managers.creature_mgr;
+    let Some(spawn) = creature_mgr.get_spawn_data_by_id(spawn_id) else {
+        return;
+    };
+    let guids: Vec<ObjectGuid> = creature_mgr
+        .creatures_in_copy(spawn.map_id, instance_id)
+        .into_iter()
+        .filter(|&guid| creature_mgr.get_spawn_id(guid) == Some(spawn_id))
+        .collect();
+    for guid in guids {
+        let position = creature_mgr.get_position(guid).unwrap_or(spawn.position);
+        if let Some(map) = world.managers.map_mgr.get_map(spawn.map_id, instance_id) {
+            map.remove_creature(guid, position);
+            map.remove_from_active(guid);
+        }
+        let viewers = players_near(world, spawn.map_id, instance_id, position);
+        world
+            .managers
+            .broadcast_mgr
+            .broadcast_msg_to_players(&viewers, &SmsgDestroyObject { guid });
+        world.systems.loot.remove_loot(guid);
+        world.systems.pool.on_object_despawned(guid);
+        creature_mgr.remove_creature(guid);
     }
 }
 
@@ -418,61 +454,83 @@ fn update_gameobject(world: &World, spawn_id: u32, eligible: bool) {
     for instance_id in loaded_copies_at(world, spawn.map_id, spawn.position) {
         let present = gameobject_mgr.has_spawn(spawn.map_id, instance_id, spawn_id);
         if eligible && !present {
-            if !world.systems.pool.can_gameobject_spawn(spawn_id, instance_id) {
-                continue;
-            }
-            let Some(guid) = gameobject_mgr.spawn_gameobject(&spawn, instance_id) else {
-                continue;
-            };
-            world
-                .systems
-                .pool
-                .on_gameobject_spawned(spawn_id, instance_id, guid);
-            let in_world = gameobject_mgr
-                .with_gameobject(guid, |go| go.in_world)
-                .unwrap_or(false);
-            if !in_world {
-                continue;
-            }
-            let map = world
-                .managers
-                .map_mgr
-                .get_or_create_map(spawn.map_id, instance_id);
-            map.add_gameobject(guid, spawn.position);
-            if gameobject_mgr.is_spawn_active(spawn_id) {
-                map.add_to_active(guid, spawn.position);
-            }
-            gameobject_mgr.add_collision_model(guid, &world.managers.vmap_mgr);
-            for player in players_near(world, spawn.map_id, instance_id, spawn.position) {
-                if let Some(create) = gameobject_mgr.build_create_msg(guid, player, world) {
-                    world.managers.broadcast_mgr.send_msg_to_player(player, create);
-                }
-            }
+            spawn_gameobject_in_copy(world, spawn_id, instance_id);
         } else if !eligible && present {
-            let guids: Vec<ObjectGuid> = gameobject_mgr
-                .gameobjects_in_copy(spawn.map_id, instance_id)
-                .into_iter()
-                .filter(|&guid| {
-                    gameobject_mgr
-                        .with_gameobject(guid, |go| go.spawn_id)
-                        .is_some_and(|id| id == spawn_id)
-                })
-                .collect();
-            for guid in guids {
-                if let Some(map) = world.managers.map_mgr.get_map(spawn.map_id, instance_id) {
-                    map.remove_gameobject(guid, spawn.position);
-                    map.remove_from_active(guid);
-                }
-                let viewers = players_near(world, spawn.map_id, instance_id, spawn.position);
-                world
-                    .managers
-                    .broadcast_mgr
-                    .broadcast_msg_to_players(&viewers, &SmsgDestroyObject { guid });
-                world.systems.pool.on_object_despawned(guid);
-                gameobject_mgr.remove_collision_model(guid, &world.managers.vmap_mgr);
-                gameobject_mgr.remove_gameobject(guid);
-            }
+            despawn_gameobject_in_copy(world, spawn_id, instance_id);
         }
+    }
+}
+
+/// Spawn a database gameobject into one copy and show it to nearby players.
+pub(crate) fn spawn_gameobject_in_copy(
+    world: &World,
+    spawn_id: u32,
+    instance_id: u32,
+) -> Option<ObjectGuid> {
+    let gameobject_mgr = &world.managers.gameobject_mgr;
+    let spawn = gameobject_mgr.get_spawn_data_by_id(spawn_id)?;
+    if gameobject_mgr.has_spawn(spawn.map_id, instance_id, spawn_id) {
+        return None;
+    }
+    if !world.systems.pool.can_gameobject_spawn(spawn_id, instance_id) {
+        return None;
+    }
+    let guid = gameobject_mgr.spawn_gameobject(&spawn, instance_id)?;
+    world
+        .systems
+        .pool
+        .on_gameobject_spawned(spawn_id, instance_id, guid);
+    let in_world = gameobject_mgr
+        .with_gameobject(guid, |go| go.in_world)
+        .unwrap_or(false);
+    if !in_world {
+        return Some(guid);
+    }
+    let map = world
+        .managers
+        .map_mgr
+        .get_or_create_map(spawn.map_id, instance_id);
+    map.add_gameobject(guid, spawn.position);
+    if gameobject_mgr.is_spawn_active(spawn_id) {
+        map.add_to_active(guid, spawn.position);
+    }
+    gameobject_mgr.add_collision_model(guid, &world.managers.vmap_mgr);
+    for player in players_near(world, spawn.map_id, instance_id, spawn.position) {
+        if let Some(create) = gameobject_mgr.build_create_msg(guid, player, world) {
+            world.managers.broadcast_mgr.send_msg_to_player(player, create);
+        }
+    }
+    Some(guid)
+}
+
+/// Remove a database gameobject from one copy.
+pub(crate) fn despawn_gameobject_in_copy(world: &World, spawn_id: u32, instance_id: u32) {
+    let gameobject_mgr = &world.managers.gameobject_mgr;
+    let Some(spawn) = gameobject_mgr.get_spawn_data_by_id(spawn_id) else {
+        return;
+    };
+    let guids: Vec<ObjectGuid> = gameobject_mgr
+        .gameobjects_in_copy(spawn.map_id, instance_id)
+        .into_iter()
+        .filter(|&guid| {
+            gameobject_mgr
+                .with_gameobject(guid, |go| go.spawn_id)
+                .is_some_and(|id| id == spawn_id)
+        })
+        .collect();
+    for guid in guids {
+        if let Some(map) = world.managers.map_mgr.get_map(spawn.map_id, instance_id) {
+            map.remove_gameobject(guid, spawn.position);
+            map.remove_from_active(guid);
+        }
+        let viewers = players_near(world, spawn.map_id, instance_id, spawn.position);
+        world
+            .managers
+            .broadcast_mgr
+            .broadcast_msg_to_players(&viewers, &SmsgDestroyObject { guid });
+        world.systems.pool.on_object_despawned(guid);
+        gameobject_mgr.remove_collision_model(guid, &world.managers.vmap_mgr);
+        gameobject_mgr.remove_gameobject(guid);
     }
 }
 

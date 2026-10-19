@@ -57,6 +57,7 @@ pub struct CreatureTemplateRow {
     pub call_for_help_range: f32,
     pub leash_range: f32,
     pub civilian: i64,
+    pub racial_leader: i64,
 }
 
 /// Row from creature_classlevelstats table - base stats per class and level

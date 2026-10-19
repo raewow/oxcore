@@ -162,6 +162,71 @@ impl PlayerSystem {
 
         // Execute each pending attack
         for attack in &pending_attacks {
+            if attack.target.is_player() {
+                let Some(target_pos) = world.managers.player_mgr.get_position(attack.target) else {
+                    continue;
+                };
+                let in_range = melee_range::is_within_melee_range(
+                    &player_pos,
+                    DEFAULT_COMBAT_REACH,
+                    &target_pos,
+                    DEFAULT_COMBAT_REACH,
+                    player_moving,
+                );
+                let facing = player_pos.has_in_arc(std::f32::consts::PI, &target_pos);
+                if !in_range || !facing {
+                    let error = if in_range { 2 } else { 1 };
+                    let should_send = world
+                        .managers
+                        .player_mgr
+                        .with_player_mut(player_guid, |p| {
+                            let send = p.combat.last_swing_error != error;
+                            p.combat.last_swing_error = error;
+                            p.combat.main_hand_timer = 100;
+                            send
+                        })
+                        .unwrap_or(false);
+                    if should_send {
+                        let opcode = if in_range {
+                            Opcode::SMSG_ATTACKSWING_BADFACING
+                        } else {
+                            Opcode::SMSG_ATTACKSWING_NOTINRANGE
+                        };
+                        world
+                            .managers
+                            .broadcast_mgr
+                            .send_to_player(player_guid, WorldPacket::new(opcode));
+                    }
+                    continue;
+                }
+                world.managers.player_mgr.with_player_mut(player_guid, |p| {
+                    p.combat.last_swing_error = 0;
+                });
+                if attack.hand == crate::game::combat::AttackHand::MainHand
+                    && world
+                        .systems
+                        .spells
+                        .cast_queued_melee_spell(attack.attacker, attack.target, world)
+                        .await?
+                {
+                    continue;
+                }
+                let finished = crate::handlers::creature_combat::execute_pending_attack_vs_player(
+                    world,
+                    attack.attacker,
+                    attack.target,
+                )
+                .await?;
+                if finished {
+                    world
+                        .systems
+                        .combat
+                        .stop_attack(player_guid, &world.managers.player_mgr)
+                        .await?;
+                    break;
+                }
+                continue;
+            }
             if attack.target.is_unit() && !attack.target.is_player() {
                 let target_pos = world
                     .managers

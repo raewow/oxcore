@@ -6,9 +6,6 @@ partial.
 
 ## Flight paths
 
-- **Honour-rank discount.** The reference takes money off a flight for honour
-  rank as well as reputation; honour rank is not stored on the player, so only
-  the Honored reputation discount applies.
 - **Spell-started flights do not interrupt other casts.** The reference
   interrupts the player's other spells when a spell sends them on a flight.
 - **No early landing.** The 1.14 client has a button to land at the next node;
@@ -19,8 +16,6 @@ partial.
 
 ## Area triggers and teleporting
 
-- **Battleground entrance triggers.** The level/team refusal for battleground
-  entrances is missing because there is no battleground system (see below).
 - **Bind area ignores WMO areas.** Binding at an inn reads the area from
   terrain only, so inns inside buildings may record the zone instead of the
   sub-area.
@@ -37,23 +32,46 @@ partial.
 
 ## Battlegrounds
 
-There is no battleground system; only scaffolding exists.
+Queues, matches and Warsong Gulch, Arathi Basin and Alterac Valley exist; the
+field logic is Lua (`scripts/battlegrounds/`).
 
-- **Wrong 1.12 opcodes.** `SMSG_BATTLEFIELD_JOINED` 0x2E1 (really
-  `CMSG_LEAVE_BATTLEFIELD`), `CMSG_LEAVE_BATTLEFIELD` 0x2E5 (really
-  `CMSG_GM_UNTEACH`), `CMSG_BATTLEFIELD_UN_QUEUE` 0x23F (really
-  `SMSG_BATTLEFIELD_WIN`). Ten battleground opcodes are missing.
-- **Wrong 1.12 layouts.** `SmsgBattlefieldStatus` has no queue slot and the
-  wrong field order; `SmsgBattlefieldList` has no battlemaster guid or bracket.
-- **No world-state updates** on either protocol (`SMSG_UPDATE_WORLD_STATE`).
-- **No queue, invitations, per-match map copies, event-gated spawns, match
-  lifecycle, entry point, leaving/Deserter, raid groups, scoreboard or
-  spirit-guide waves.** The world tables for all of this are populated but not
-  loaded. A character saved on a battleground map logs into one shared copy.
-- **No Warsong Gulch, Arathi Basin or Alterac Valley logic.**
-- **No PvP flag.** `CMSG_TOGGLE_PVP` is unhandled and nothing sets the flag.
-- **Honour is a stand-in.** Simplified formula, no dishonourable kills, weekly
-  honour kept in memory but never saved, no honour rank or weekly ranking.
+- **No battleground raid groups.** Players keep their own groups; the
+  reference puts each side in a temporary raid for the match.
+- **Alterac Valley is the core battle only.** Missing: armour-scrap upgrades of
+  defenders, the air, cavalry and world-boss assaults raised by turn-ins,
+  landmines, quest completions on tower, graveyard and mine captures, the
+  commanders' guards stopping on a commander's death, Snivvle, and the herald
+  and captain yells (announcements go to battleground chat instead).
+- **Buffs.** Warsong Gulch relies on the static buff spawns; Arathi Basin
+  spawns one random buff per base at the start and does not rotate or respawn
+  them.
+- **Announcement text** for Arathi Basin and Alterac Valley node events is
+  English text in the scripts, not localised strings.
+- **Not implemented:** looting insignia from dead players, queue announcer
+  messages, the group-size queue limit, Alterac Valley's minimum queue size and
+  initial player cap, 1.14's `SMSG_BATTLEGROUND_INIT`, and the "only in
+  battlegrounds" / "battleground ended" spell cast checks.
+- **Event spawns and respawns.** A battleground creature that respawns on its
+  own timer ignores whether its event is still active.
+
+## World PvP
+
+- **Eastern Plaguelands towers are not implemented.**
+- **Silithus** covers zone 1377 only (not the Ahn'Qiraj zones' buff), does not
+  show the dust bags, and does not keep its count over a restart.
+
+## PvP flag and honour
+
+- **Pets are not flagged** with their owner.
+- **Helping a flagged player** (heals, buffs) does not flag the helper; the
+  hook exists but no spell path calls it.
+- **Contested and free-for-all PvP** (guards attacking flagged players,
+  arenas such as Gurubashi) are not modelled.
+- **Melee between players** is new: off-hand swings at players use main-hand
+  damage, and duels are not supported.
+- **Honour:** city protector titles are not set by the weekly ranking,
+  `MSG_INSPECT_HONOR_STATS` is not handled, and the 1.14 honour tab is empty
+  (its update fields have no 1.14 mapping).
 
 ## Vendors
 
@@ -63,5 +81,6 @@ There is no battleground system; only scaffolding exists.
 ## Not verified
 
 - The 31 database-backed tests (ignored without a database) and live 1.12 and
-  1.14 client checks of teleports, flights and the 1.12 creature waypoint
-  packing fix.
+  1.14 client checks of teleports, flights, the 1.12 creature waypoint packing
+  fix, battlegrounds, world PvP, the PvP flag and honour. The battleground
+  world tables have never been loaded by this code against a real database.

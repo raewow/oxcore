@@ -7,7 +7,7 @@
 //! is created in the copy, when a creature enters combat, evades or dies,
 //! when a player enters or leaves, and on a periodic update.
 
-use crate::core::lua::{CreatureScriptState, LuaAction};
+use crate::core::lua::LuaAction;
 use crate::game::common::update_fields::GAMEOBJECT_STATE;
 use crate::game::gameobject::GOState;
 use crate::World;
@@ -27,7 +27,7 @@ fn script_for(
     world.managers.lua_mgr.get_instance_ai(map_id)
 }
 
-fn snapshot(
+pub(crate) fn snapshot(
     world: &World,
     map_id: u32,
     instance_id: u32,
@@ -43,6 +43,13 @@ fn snapshot(
         .get_map(map_id, instance_id)
         .map(|map| map.player_count() as u32)
         .unwrap_or(0);
+    snapshot.scope = crate::game::pvp::objective::scope_view(
+        world,
+        crate::game::pvp::scope::Scope::Copy {
+            map_id,
+            instance_id,
+        },
+    );
     snapshot
 }
 
@@ -113,15 +120,24 @@ pub async fn on_creature_death(
     instance_id: u32,
     entry: u32,
     guid: ObjectGuid,
+    killer: Option<ObjectGuid>,
+    spawn_id: u32,
 ) {
     let Some(script) = script_for(world, map_id, instance_id) else {
         return;
     };
+    let event = world
+        .managers
+        .bg_events
+        .events_of(crate::game::game_event::EventSpawnKind::Creature, spawn_id)
+        .first()
+        .copied()
+        .unwrap_or((255, 255));
     let snapshot = snapshot(world, map_id, instance_id);
     let actions = world
         .managers
         .lua_mgr
-        .with_lua(|lua| script.on_creature_death(lua, &snapshot, entry, guid));
+        .with_lua(|lua| script.on_creature_death(lua, &snapshot, entry, guid, killer, event));
     apply(world, map_id, instance_id, Some(guid), actions).await;
 }
 
@@ -245,14 +261,17 @@ pub async fn update(world: &World, map_id: u32, instance_id: u32, diff_ms: u32) 
     let mut state = lua_mgr.get_instance_state(map_id, instance_id);
     state.update_timers(diff_ms);
     lua_mgr.set_instance_state(map_id, instance_id, state);
-    let snapshot = snapshot(world, map_id, instance_id);
+    let mut snapshot = snapshot(world, map_id, instance_id);
+    snapshot.diff_ms = diff_ms;
     let actions = lua_mgr.with_lua(|lua| script.on_update(lua, &snapshot));
     apply(world, map_id, instance_id, None, actions).await;
 }
 
-/// Carry out a script's actions. Instance-level actions (data, stored guids,
-/// timers, doors) apply to the copy; anything else needs a creature to act
-/// through and is run by that creature when the callback has one.
+/// Carry out a script's actions. Copy-level actions (data, stored guids,
+/// timers, doors, world states, spawn events, announcements) apply to the
+/// copy; anything else needs a creature to act through and is run by that
+/// creature when the callback has one. Dungeon data is saved with the copy;
+/// battleground copies never persist.
 async fn apply(
     world: &World,
     map_id: u32,
@@ -263,64 +282,29 @@ async fn apply(
     if actions.is_empty() {
         return;
     }
-    let lua_mgr = &world.managers.lua_mgr;
-    let mut data_changed = false;
-    let mut creature_actions = Vec::new();
+    let data_changed = actions
+        .iter()
+        .any(|a| matches!(a, LuaAction::SetInstanceData { .. }));
+    crate::game::pvp::objective::apply(
+        world,
+        crate::game::pvp::scope::Scope::Copy {
+            map_id,
+            instance_id,
+        },
+        creature,
+        None,
+        actions,
+    )
+    .await;
 
-    for action in actions {
-        match action {
-            LuaAction::SetInstanceData { data_id, value } => {
-                lua_mgr.set_instance_data(map_id, instance_id, data_id, value);
-                data_changed = true;
-            }
-            LuaAction::SetInstanceGuid { data_id, guid } => {
-                let mut state = lua_mgr.get_instance_state(map_id, instance_id);
-                state.set_guid(data_id, guid);
-                lua_mgr.set_instance_state(map_id, instance_id, state);
-            }
-            LuaAction::SetTimer {
-                timer_id,
-                duration_ms,
-            } => {
-                let mut state = lua_mgr.get_instance_state(map_id, instance_id);
-                state.set_timer(timer_id, duration_ms);
-                lua_mgr.set_instance_state(map_id, instance_id, state);
-            }
-            LuaAction::OpenDoor { guid } => set_door(world, guid, true),
-            LuaAction::CloseDoor { guid } => set_door(world, guid, false),
-            LuaAction::OpenDoorByData { data_id } => {
-                if let Some(guid) = lua_mgr.get_instance_state(map_id, instance_id).get_guid(data_id) {
-                    set_door(world, guid, true);
-                }
-            }
-            LuaAction::CloseDoorByData { data_id } => {
-                if let Some(guid) = lua_mgr.get_instance_state(map_id, instance_id).get_guid(data_id) {
-                    set_door(world, guid, false);
-                }
-            }
-            other => creature_actions.push(other),
-        }
-    }
-
-    if !creature_actions.is_empty() {
-        match creature {
-            Some(creature) => {
-                let mut state = CreatureScriptState::default();
-                let ai_actions =
-                    crate::core::lua::bridge::lua_actions_to_ai_actions(creature_actions, &mut state);
-                crate::game::creature::ai::executor::execute_actions(world, creature, ai_actions);
-            }
-            None => tracing::debug!(
-                "Instance script {}:{} returned {} actions with no creature to run them",
-                map_id,
-                instance_id,
-                creature_actions.len()
-            ),
-        }
-    }
-
-    if data_changed {
-        let data = lua_mgr.get_instance_state(map_id, instance_id).data;
+    let battleground = crate::game::instance::lifecycle::map_entry(world, map_id)
+        .is_some_and(|entry| entry.is_battleground());
+    if data_changed && !battleground {
+        let data = world
+            .managers
+            .lua_mgr
+            .get_instance_state(map_id, instance_id)
+            .data;
         if let Err(e) = world
             .managers
             .instance_mgr

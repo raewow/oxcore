@@ -52,6 +52,11 @@ pub async fn handle_gameobj_use(
     // Release this DashMap read guard before dispatching the interaction.
     drop(go);
 
+    // Battleground flags and objective objects belong to the scope's script.
+    if crate::game::pvp::objective::on_gameobject_use(world, player_guid, go_guid).await {
+        return Ok(());
+    }
+
     let template = world.managers.gameobject_mgr.get_template(go_entry);
     let gossip_id = template
         .as_ref()

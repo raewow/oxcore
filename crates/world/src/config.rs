@@ -255,6 +255,34 @@ pub struct Config {
     #[serde(default = "default_true")]
     pub cast_unstuck: bool,
 
+    // Battleground Settings
+    /// Leaving a running battleground gives the Deserter debuff (default: true).
+    #[serde(default = "default_true")]
+    pub battleground_cast_deserter: bool,
+    /// 0: invite whoever fits; 1: keep both sides within a player of each other.
+    #[serde(default)]
+    pub battleground_invitation_type: u32,
+    /// A short-handed battleground closes after this long (ms; 0 never).
+    #[serde(default = "default_battleground_premature_finish_ms")]
+    pub battleground_premature_finish_ms: u32,
+    /// Premade groups wait this long for an opposing premade (ms; 0 disables premades).
+    #[serde(default)]
+    pub battleground_premade_wait_ms: u32,
+    /// Groups at least this large count as premade.
+    #[serde(default = "default_battleground_premade_min_size")]
+    pub battleground_premade_min_size: u32,
+
+    // Honor Settings
+    /// Weekday of the weekly honour ranking (0 Sunday .. 6 Saturday; default Thursday).
+    #[serde(default = "default_honor_maintenance_day")]
+    pub honor_maintenance_day: u32,
+    /// Share of rank points lost each week (default 0.2).
+    #[serde(default = "default_honor_rp_decay")]
+    pub honor_rp_decay: f32,
+    /// Killing gray civilians is a dishonourable kill (default: true).
+    #[serde(default = "default_true")]
+    pub honor_dishonorable_kills: bool,
+
     // Talent Reset (Respec) Settings
     #[serde(default = "default_respec_base_cost")]
     pub respec_base_cost: Option<u32>, // Base cost for first talent reset in gold (default: 1)
@@ -513,6 +541,22 @@ fn default_activate_weather() -> Option<bool> {
     Some(true)
 }
 
+fn default_battleground_premature_finish_ms() -> u32 {
+    5 * 60 * 1000
+}
+
+fn default_battleground_premade_min_size() -> u32 {
+    6
+}
+
+fn default_honor_maintenance_day() -> u32 {
+    4
+}
+
+fn default_honor_rp_decay() -> f32 {
+    0.2
+}
+
 fn default_min_honor_kills() -> Option<u32> {
     Some(15)
 }
@@ -767,6 +811,14 @@ impl Default for Config {
             accurate_pvp_rewards: None,
             wow_patch: default_wow_patch(),
             cast_unstuck: true,
+            battleground_cast_deserter: true,
+            battleground_invitation_type: 0,
+            battleground_premature_finish_ms: default_battleground_premature_finish_ms(),
+            battleground_premade_wait_ms: 0,
+            battleground_premade_min_size: default_battleground_premade_min_size(),
+            honor_maintenance_day: default_honor_maintenance_day(),
+            honor_rp_decay: default_honor_rp_decay(),
+            honor_dishonorable_kills: true,
             respec_base_cost: default_respec_base_cost(),
             respec_multiplicative_cost: default_respec_multiplicative_cost(),
             respec_min_multiplier: default_respec_min_multiplier(),

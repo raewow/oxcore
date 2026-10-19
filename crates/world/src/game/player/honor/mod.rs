@@ -1,10 +1,16 @@
-//! PvP honor / kill-credit system.
+//! PvP honour: contribution points, honourable and dishonourable kills,
+//! ranks and the weekly ranking.
 //!
-//! Tracks damage contributors on each player so that when they die to enemy
-//! players, all attackers within a 60-second window receive honor credit.
+//! Damage between enemy players is tracked on the victim so that when they
+//! die, the attackers (and their groups) of the last minute share the honour.
 
 pub mod contributor;
+pub mod rank;
 pub mod system;
 
 pub use contributor::{Contributor, ContributorTracker, CONTRIBUTOR_WINDOW_SECS};
-pub use system::HonorSystem;
+pub use rank::HonorRankInfo;
+pub use system::{
+    add_honor, load, on_creature_killed, save, send_fields, weekly_maintenance, HonorState,
+    HonorSystem, HonorType,
+};

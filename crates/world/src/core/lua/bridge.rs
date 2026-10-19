@@ -632,7 +632,27 @@ pub fn lua_actions_to_ai_actions(
             | LuaAction::SendTaxi
             | LuaAction::KillCreditNearestCreature { .. }
             | LuaAction::SpawnCreatureAtPlayer { .. }
-            | LuaAction::CastSpellOnNearestCreature { .. } => {
+            | LuaAction::CastSpellOnNearestCreature { .. }
+            // Objective actions belong to a copy or zone, not to a creature.
+            | LuaAction::SetWorldState { .. }
+            | LuaAction::SpawnEvent { .. }
+            | LuaAction::DoorEvent { .. }
+            | LuaAction::Announce { .. }
+            | LuaAction::PlaySoundToScope { .. }
+            | LuaAction::CastSpellOnTeam { .. }
+            | LuaAction::PlayerCastSpell { .. }
+            | LuaAction::PlayerRemoveAura { .. }
+            | LuaAction::RewardHonorToTeam { .. }
+            | LuaAction::RewardHonor { .. }
+            | LuaAction::RewardReputationToTeam { .. }
+            | LuaAction::UpdateScore { .. }
+            | LuaAction::EndMatch { .. }
+            | LuaAction::SetFlagCarrier { .. }
+            | LuaAction::SetInCaptureArea { .. }
+            | LuaAction::DespawnGameObject { .. }
+            | LuaAction::LeaveBattleground { .. }
+            | LuaAction::KillCredit { .. }
+            | LuaAction::RepopTeam { .. } => {
                 tracing::debug!("Lua action not yet implemented: {:?}", action);
             }
         }

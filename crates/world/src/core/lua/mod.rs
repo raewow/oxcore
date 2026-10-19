@@ -28,11 +28,12 @@ pub mod error;
 pub mod gossip_executor;
 pub mod loader;
 pub mod manager;
+pub mod objective;
 pub mod scripts;
 pub mod snapshot;
 pub mod zone_executor;
 
-pub use actions::{LuaAction, ReactState, SpellTarget, SummonType};
+pub use actions::{AnnounceChat, LuaAction, ReactState, SpellTarget, SummonType};
 pub use error::{LuaError, LuaResult};
 pub use gossip_executor::{build_player_snapshot, execute_gossip_actions};
 pub use loader::LoadResult;

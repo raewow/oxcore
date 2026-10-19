@@ -19,10 +19,7 @@ pub mod trade;
 
 pub use account_data::{compress_account_data, decompress_account_data, AccountDataType};
 pub use auction::{AuctionAction, AuctionEntry, AuctionError, AuctionHouseId, AuctionQueryType};
-pub use battleground::{
-    BattleGroundPlayer, BattleGroundScore, BattleGroundStatus, BattleGroundTypeId,
-    BattleGroundWinner,
-};
+pub use battleground::{BattleGroundStatus, BattleGroundTypeId, BattleGroundWinner};
 pub use chat::{ChatMsg, ChatTag, Language, Team};
 pub use duel::{DuelInfo, DuelRequest};
 pub use experience::{

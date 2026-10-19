@@ -215,32 +215,30 @@ pub async fn handle_self_res(
 pub async fn handle_area_spirit_healer_query(
     session: &WorldSession,
     packet: &mut WorldPacket,
-    _world: &World,
+    world: &World,
 ) -> Result<()> {
+    let Some(player_guid) = session.player_guid() else {
+        return Ok(());
+    };
     let healer_guid = match packet.read_guid_for(session.protocol()) {
         Some(g) => g,
         None => return Ok(()),
     };
-
-    // Reply with time until next wave. Real BG system (Phase 7+) will compute
-    // this from the battleground's wave timer. For now, return a fixed 30s.
-    const WAVE_INTERVAL_MS: u32 = 30_000;
-
+    // Only spirit guides inside a battleground answer: the time to their next wave.
+    let Some(time_left_ms) = crate::game::battleground::system::spirit_healer_time(world, player_guid) else {
+        return Ok(());
+    };
     session.send_msg(oxcore_shared::messages::death::SmsgAreaSpiritHealerTime {
         healer_guid,
-        time_left_ms: WAVE_INTERVAL_MS,
+        time_left_ms,
     })?;
     Ok(())
 }
 
 /// Handle CMSG_AREA_SPIRIT_HEALER_QUEUE (0x02E3)
 ///
-/// Sent when a ghost queues themselves for the next resurrection wave at a
-/// spirit healer in a battleground. In vanilla this flags the player for
-/// batch resurrection on the wave tick.
-///
-/// Packet structure:
-///   healer_guid: u64
+/// A ghost in a battleground waits at a spirit guide for its next
+/// resurrection wave.
 pub async fn handle_area_spirit_healer_queue(
     session: &WorldSession,
     packet: &mut WorldPacket,
@@ -251,10 +249,7 @@ pub async fn handle_area_spirit_healer_queue(
         None => return Ok(()),
     };
     let _healer_guid = packet.read_guid_for(session.protocol());
-
-    // Delegate to DeathSystem. The real BG wave system (Phase 8) will consume
-    // this queue on its 30s timer. For now we just mark the player queued.
-    world.systems.death.queue_for_spirit_healer(player_guid);
+    crate::game::battleground::system::queue_for_wave(world, player_guid).await;
     Ok(())
 }
 

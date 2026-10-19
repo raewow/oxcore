@@ -2049,9 +2049,8 @@ impl GroupSystem {
 
     /// Live member status for `guid` (reference `GetGroupMemberStatus`, Group.cpp:45).
     ///
-    /// Offline when there is no live player. Omitted by caller request: the PvP and FFA-PvP
-    /// bits (`MEMBER_STATUS_PVP`, `MEMBER_STATUS_PVP_FFA`) depend on a PvP-flag port that does
-    /// not yet exist; the remaining bits are computed from the live player state.
+    /// Offline when there is no live player. Free-for-all PvP does not exist in
+    /// vanilla's world, so `MEMBER_STATUS_PVP_FFA` is never set.
     fn member_status(&self, guid: ObjectGuid) -> MemberStatus {
         let Some(player) = self.player_mgr.get_player(guid) else {
             return MemberStatus::OFFLINE;
@@ -2069,6 +2068,9 @@ impl GroupSystem {
         }
         if player.player_flags & PLAYER_FLAGS_DND != 0 {
             status = status.with_flag(MemberStatus::DND);
+        }
+        if player.unit_flags & crate::game::common::unit_flags::PVP != 0 {
+            status = status.with_flag(MemberStatus::PVP);
         }
         status
     }

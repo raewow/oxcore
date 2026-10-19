@@ -385,7 +385,6 @@ fn is_known_benign(opcode: Opcode) -> bool {
             | Opcode::CMSG_CHAT_UNREGISTER_ALL_ADDON_PREFIXES
             | Opcode::CMSG_QUERY_COUNTDOWN_TIMER
             | Opcode::CMSG_REQUEST_CEMETERY_LIST
-            | Opcode::CMSG_REQUEST_BATTLEFIELD_STATUS
             | Opcode::CMSG_LFG_LIST_GET_STATUS
             | Opcode::CMSG_BATTLE_PET_REQUEST_JOURNAL
             | Opcode::CMSG_ARENA_TEAM_ACCEPT

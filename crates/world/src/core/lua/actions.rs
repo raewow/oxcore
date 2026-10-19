@@ -385,6 +385,66 @@ pub enum LuaAction {
         spell_id: u32,
         search_radius: f32,
     },
+
+    // ==================== Objectives (battlegrounds, world PvP) ====================
+    /// Set a world state for everyone in the script's scope (copy or zone).
+    SetWorldState { state_id: u32, value: i32 },
+    /// Switch a battleground spawn event on (replacing its slot's event) or off.
+    SpawnEvent { event1: u8, event2: u8, spawn: bool },
+    /// Open or close the doors of an active spawn event.
+    DoorEvent { event1: u8, event2: u8, open: bool },
+    /// Announce to the scope, or to one team. `$n` in the text becomes `player`'s name.
+    Announce {
+        text: Option<String>,
+        text_id: Option<u32>,
+        chat: AnnounceChat,
+        team: Option<u32>,
+        player: Option<ObjectGuid>,
+    },
+    /// Play a sound to the scope, or to one team.
+    PlaySoundToScope { sound_id: u32, team: Option<u32> },
+    /// Every player of a team in the scope casts a spell on themselves.
+    CastSpellOnTeam { spell_id: u32, team: u32 },
+    /// A player casts a (triggered) spell on themselves.
+    PlayerCastSpell { player: ObjectGuid, spell_id: u32 },
+    /// Remove an aura from a player.
+    PlayerRemoveAura { player: ObjectGuid, spell_id: u32 },
+    /// Bonus honour for every player of a team in the scope.
+    RewardHonorToTeam { team: u32, amount: u32 },
+    /// Bonus honour for one player.
+    RewardHonor { player: ObjectGuid, amount: u32 },
+    /// Reputation for every player of a team in the scope.
+    RewardReputationToTeam { team: u32, faction_id: u32, amount: i32 },
+    /// Add to one of a player's battleground scoreboard columns (0-based).
+    UpdateScore { player: ObjectGuid, column: u32, value: u32 },
+    /// End the battleground; `winner` is a team, or 0 for a draw.
+    EndMatch { winner: u32 },
+    /// Record (or clear) who carries a team's flag.
+    SetFlagCarrier { team: u32, player: Option<ObjectGuid> },
+    /// A player entered or left a capture area; it keeps them PvP flagged.
+    SetInCaptureArea { player: ObjectGuid, inside: bool },
+    /// Remove a gameobject from the scope by guid, or every one of an entry.
+    DespawnGameObject {
+        guid: Option<ObjectGuid>,
+        entry: Option<u32>,
+    },
+    /// Send a player out of their battleground.
+    LeaveBattleground { player: ObjectGuid },
+    /// Quest kill credit for a creature entry.
+    KillCredit { player: ObjectGuid, entry: u32 },
+    /// Send dead players of a team (or everyone) to their graveyard again,
+    /// e.g. after the graveyard they waited at changed hands.
+    RepopTeam { team: Option<u32> },
+}
+
+/// Chat colour of an announcement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnnounceChat {
+    Neutral,
+    Alliance,
+    Horde,
+    System,
+    BossEmote,
 }
 
 impl LuaAction {
@@ -721,6 +781,111 @@ impl LuaAction {
                 creature_entry: table.get("creature_entry").ok()?,
                 spell_id: table.get("spell_id").ok()?,
                 search_radius: table.get("search_radius").unwrap_or(10.0),
+            }),
+
+            // Objectives
+            "SET_WORLD_STATE" => Some(LuaAction::SetWorldState {
+                state_id: table.get("state_id").ok()?,
+                value: table.get("value").ok()?,
+            }),
+            "SPAWN_EVENT" => Some(LuaAction::SpawnEvent {
+                event1: table.get("event1").ok()?,
+                event2: table.get("event2").unwrap_or(0),
+                spawn: table.get("spawn").unwrap_or(true),
+            }),
+            "DOOR_EVENT" => Some(LuaAction::DoorEvent {
+                event1: table.get("event1").ok()?,
+                event2: table.get("event2").unwrap_or(0),
+                open: table.get("open").unwrap_or(true),
+            }),
+            "ANNOUNCE" => {
+                let text: Option<String> = table.get("text").ok();
+                let text_id: Option<u32> = table.get("text_id").ok();
+                if text.is_none() && text_id.is_none() {
+                    return None;
+                }
+                let chat = match table
+                    .get::<String>("chat")
+                    .unwrap_or_default()
+                    .to_uppercase()
+                    .as_str()
+                {
+                    "ALLIANCE" => AnnounceChat::Alliance,
+                    "HORDE" => AnnounceChat::Horde,
+                    "SYSTEM" => AnnounceChat::System,
+                    "BOSS_EMOTE" => AnnounceChat::BossEmote,
+                    _ => AnnounceChat::Neutral,
+                };
+                Some(LuaAction::Announce {
+                    text,
+                    text_id,
+                    chat,
+                    team: table.get("team").ok().filter(|&team: &u32| team != 0),
+                    player: parse_guid(table, "player"),
+                })
+            }
+            "PLAY_SOUND_TO_SCOPE" => Some(LuaAction::PlaySoundToScope {
+                sound_id: table.get("sound_id").ok()?,
+                team: table.get("team").ok().filter(|&team: &u32| team != 0),
+            }),
+            "CAST_SPELL_ON_TEAM" => Some(LuaAction::CastSpellOnTeam {
+                spell_id: table.get("spell_id").ok()?,
+                team: table.get("team").ok()?,
+            }),
+            "PLAYER_CAST_SPELL" => Some(LuaAction::PlayerCastSpell {
+                player: parse_guid(table, "player")?,
+                spell_id: table.get("spell_id").ok()?,
+            }),
+            "PLAYER_REMOVE_AURA" => Some(LuaAction::PlayerRemoveAura {
+                player: parse_guid(table, "player")?,
+                spell_id: table.get("spell_id").ok()?,
+            }),
+            "REWARD_HONOR_TO_TEAM" => Some(LuaAction::RewardHonorToTeam {
+                team: table.get("team").ok()?,
+                amount: table.get("amount").ok()?,
+            }),
+            "REWARD_HONOR" => Some(LuaAction::RewardHonor {
+                player: parse_guid(table, "player")?,
+                amount: table.get("amount").ok()?,
+            }),
+            "REWARD_REPUTATION_TO_TEAM" => Some(LuaAction::RewardReputationToTeam {
+                team: table.get("team").ok()?,
+                faction_id: table.get("faction_id").ok()?,
+                amount: table.get("amount").ok()?,
+            }),
+            "UPDATE_SCORE" => Some(LuaAction::UpdateScore {
+                player: parse_guid(table, "player")?,
+                column: table.get("column").ok()?,
+                value: table.get("value").unwrap_or(1),
+            }),
+            "END_MATCH" => Some(LuaAction::EndMatch {
+                winner: table.get("winner").unwrap_or(0),
+            }),
+            "SET_FLAG_CARRIER" => Some(LuaAction::SetFlagCarrier {
+                team: table.get("team").ok()?,
+                player: parse_guid(table, "player").filter(|guid| !guid.is_empty()),
+            }),
+            "SET_IN_CAPTURE_AREA" => Some(LuaAction::SetInCaptureArea {
+                player: parse_guid(table, "player")?,
+                inside: table.get("inside").unwrap_or(true),
+            }),
+            "DESPAWN_GAMEOBJECT" => {
+                let guid = parse_guid(table, "guid");
+                let entry: Option<u32> = table.get("entry").ok();
+                if guid.is_none() && entry.is_none() {
+                    return None;
+                }
+                Some(LuaAction::DespawnGameObject { guid, entry })
+            }
+            "LEAVE_BATTLEGROUND" => Some(LuaAction::LeaveBattleground {
+                player: parse_guid(table, "player")?,
+            }),
+            "KILL_CREDIT" => Some(LuaAction::KillCredit {
+                player: parse_guid(table, "player")?,
+                entry: table.get("entry").ok()?,
+            }),
+            "REPOP_TEAM" => Some(LuaAction::RepopTeam {
+                team: table.get("team").ok().filter(|&team: &u32| team != 0),
             }),
 
             _ => {

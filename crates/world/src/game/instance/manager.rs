@@ -422,6 +422,14 @@ impl InstanceMgr {
 
     /// Create a new instance. Raid copies take their reset from the map's global
     /// schedule; normal dungeons get their own expiry, armed until someone enters.
+    /// Take a fresh instance id without a save (battleground copies, which never persist).
+    pub fn reserve_instance_id(&self) -> Option<u32> {
+        self.last_instance_id
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+            .map(|id| id + 1)
+            .ok()
+    }
+
     pub async fn create_instance(
         &self,
         databases: &Databases,

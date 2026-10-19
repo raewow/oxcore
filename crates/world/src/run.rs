@@ -63,6 +63,17 @@ fn build_world_config(config: &Config) -> Config {
     world_config.grid_unload_delay_secs = config.grid_unload_delay_secs;
     world_config.instance_unload_delay_secs = config.instance_unload_delay_secs;
     world_config.instance_reset_hour = config.instance_reset_hour;
+    world_config.cast_unstuck = config.cast_unstuck;
+    world_config.battleground_cast_deserter = config.battleground_cast_deserter;
+    world_config.battleground_invitation_type = config.battleground_invitation_type;
+    world_config.battleground_premature_finish_ms = config.battleground_premature_finish_ms;
+    world_config.battleground_premade_wait_ms = config.battleground_premade_wait_ms;
+    world_config.battleground_premade_min_size = config.battleground_premade_min_size;
+    world_config.honor_maintenance_day = config.honor_maintenance_day;
+    world_config.honor_rp_decay = config.honor_rp_decay;
+    world_config.honor_dishonorable_kills = config.honor_dishonorable_kills;
+    world_config.min_honor_kills = config.min_honor_kills;
+    world_config.pvp_pool_size_per_faction = config.pvp_pool_size_per_faction;
     world_config
 }
 

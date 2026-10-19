@@ -178,6 +178,16 @@ pub async fn handle_area_trigger(
         return Ok(()); // Tavern triggers don't teleport
     }
 
+    // --- Battleground entrance portals ---
+    if crate::game::battleground::system::entrance_trigger(world, player_guid, trigger_id) {
+        return Ok(());
+    }
+
+    // --- Objective scripts (battleground flag rooms, capture areas) ---
+    if crate::game::pvp::objective::on_area_trigger(world, player_guid, trigger_id).await {
+        return Ok(());
+    }
+
     // --- Teleport triggers ---
     let mut teleport = match area_trigger_mgr.get_teleport(trigger_id) {
         Some(t) => t,
