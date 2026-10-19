@@ -67,6 +67,42 @@ impl GuildSystem {
         }
     }
 
+    /// A roster entry for `guid`, with level, class and zone from the world when they are
+    /// online.
+    fn member_record(&self, guid: ObjectGuid, name: &str, rank: u8) -> GuildMember {
+        let (level, class, zone, account_id) = self
+            .player_mgr
+            .with_player(guid, |p| (p.level, p.class, p.zone_id, p.account_id))
+            .unwrap_or((1, 0, 0, 0));
+        GuildMember {
+            guid,
+            name: name.to_string(),
+            rank,
+            public_note: String::new(),
+            officer_note: String::new(),
+            level,
+            class,
+            zone,
+            account_id,
+            logout_time: 0,
+        }
+    }
+
+    /// Show a player's guild and rank on their character, to them and to those around
+    /// them, without waiting for a relog. A guild of 0 clears both.
+    fn send_membership(&self, player: ObjectGuid, guild_id: u32, rank: u8) {
+        use oxcore_shared::messages::update::{
+            ObjectType, SmsgUpdateObject, UpdateBlockData, ValuesUpdateBlock,
+        };
+        use oxcore_shared::protocol::update_fields::{PLAYER_GUILDID, PLAYER_GUILDRANK};
+        let update = SmsgUpdateObject::new().add_block(UpdateBlockData::Values(
+            ValuesUpdateBlock::new(ObjectGuid::from_low(player.counter()), ObjectType::Player)
+                .set_field(PLAYER_GUILDID, guild_id)
+                .set_field(PLAYER_GUILDRANK, u32::from(rank)),
+        ));
+        self.broadcast_mgr.broadcast_msg_nearby(player, &update, true);
+    }
+
     /// The guild whose tabard `player` may redesign: their own, if they lead it.
     pub fn emblem_guild(
         &self,
@@ -222,18 +258,7 @@ impl GuildSystem {
         };
 
         // 6. Build guild member for leader
-        let leader_member = GuildMember {
-            guid: leader_guid,
-            name: leader_name.clone(),
-            rank: 0,
-            public_note: String::new(),
-            officer_note: String::new(),
-            level: 1,      // TODO: Load from character data
-            class: 0,      // TODO: Load from character data
-            zone: 0,       // TODO: Load from character data
-            account_id: 0, // TODO: Load from character data
-            logout_time: 0,
-        };
+        let leader_member = self.member_record(leader_guid, &leader_name, 0);
 
         // 7. Create ranks
         let ranks = create_default_ranks();
@@ -309,6 +334,7 @@ impl GuildSystem {
                 rank_id: 0,
             },
         );
+        self.send_membership(leader_guid, guild_id, 0);
 
         // 13. Send success message to leader
         // Use empty string since target_name needs to be 'static for send_msg_to_player
@@ -412,6 +438,11 @@ impl GuildSystem {
             rank_id: 5,
         };
         self.members.insert(player_guid, state);
+        let record = self.member_record(player_guid, &player_name, 5);
+        if let Some(mut guild_data) = self.guilds.get_mut(&guild_id) {
+            guild_data.members.insert(player_guid, record);
+        }
+        self.send_membership(player_guid, guild_id, 5);
 
         // Send welcome event to guild (event type 3 = player joined)
         let event_packet = smsg_guild_event_from_params(
@@ -478,6 +509,7 @@ impl GuildSystem {
 
         // Update cache
         self.members.remove(&target_guid);
+        self.send_membership(target_guid, 0, 0);
 
         // Notify guild (event type 4 = player removed)
         let event = smsg_guild_event_from_params(
@@ -531,6 +563,7 @@ impl GuildSystem {
         self.guilds.remove(&guild_id);
         for guid in &member_guids {
             self.members.remove(guid);
+            self.send_membership(*guid, 0, 0);
         }
 
         // Notify all members (event type 2 = disbanded)
@@ -742,6 +775,7 @@ impl GuildSystem {
                 rank_id: 0,
             },
         );
+        self.send_membership(player_guid, 0, 0);
 
         // Send event
         self.log_guild_event(guild_id, 3, player_guid, &player_name)
@@ -856,6 +890,7 @@ impl GuildSystem {
                 rank_id: 0,
             },
         );
+        self.send_membership(new_leader_guid, guild_id, 0);
 
         // Send event
         self.log_guild_event(guild_id, 6, new_leader_guid, &new_leader_name)
@@ -1264,23 +1299,11 @@ impl GuildSystem {
         self.members.insert(player_guid, state);
 
         // Update guild member list in cache
+        let record = self.member_record(player_guid, &player_name, rank_id);
         if let Some(mut guild_data) = self.guilds.get_mut(&guild_id) {
-            guild_data.members.insert(
-                player_guid,
-                GuildMember {
-                    guid: player_guid,
-                    name: player_name.clone(),
-                    rank: rank_id,
-                    public_note: String::new(),
-                    officer_note: String::new(),
-                    level: 1,
-                    class: 0,
-                    zone: 0,
-                    account_id: 0,
-                    logout_time: 0,
-                },
-            );
+            guild_data.members.insert(player_guid, record);
         }
+        self.send_membership(player_guid, guild_id, rank_id);
 
         // Send guild event (player joined)
         self.log_guild_event(guild_id, 3, player_guid, &player_name)
@@ -1339,6 +1362,7 @@ impl GuildSystem {
                 rank_id,
             },
         );
+        self.send_membership(player_guid, guild_id, rank_id);
 
         // Get player name for event
         let player_name = if let Some(member) = guild.members.get(&player_guid) {

@@ -86,10 +86,9 @@ field logic is Lua (`scripts/battlegrounds/`).
   (shown to hunters) opens nothing and MSG_LIST_STABLED_PETS is unhandled.
 - **Pet skills cannot be untrained.** Hunter pets keep no spell book, so the
   untrain option never shows.
-- **Charters found guilds through the basic join path.** Signers join the new
-  guild at its lowest rank the way GM-added members do, without the other
-  side of the guild system (member levels, classes and online fields) being
-  filled in.
+- **Offline charter signers join with placeholder roster details.** A signer
+  who is offline when the guild is founded is listed at level 1 with no class
+  or zone until they log in.
 - **Some gossip conditions are rejected.** Saved variables (11) and scripted
   map events (36) are not evaluated, so the few menus and options using them
   stay hidden. Instance script checks (18) are answered by

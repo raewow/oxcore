@@ -687,6 +687,10 @@ mod integration_tests {
     async fn test_create_guild_success_sends_packet() {
         let mut mock_repo = MockGuildRepositoryTrait::new();
         let mut mock_broadcaster = MockBroadcastManagerTrait::new();
+        // Membership shows on the character for those around.
+        mock_broadcaster
+            .expect_broadcast_msg_nearby()
+            .returning(|_, _, _| ());
 
         // Name doesn't exist
         mock_repo
@@ -727,9 +731,53 @@ mod integration_tests {
     }
 
     #[tokio::test]
+    async fn joining_member_is_listed_and_shown_on_their_character() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let mut mock_repo = MockGuildRepositoryTrait::new();
+        let mut mock_broadcaster = MockBroadcastManagerTrait::new();
+        let membership_updates = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&membership_updates);
+        mock_broadcaster
+            .expect_broadcast_msg_nearby()
+            .returning(move |_, _, include_self| {
+                assert!(include_self);
+                counter.fetch_add(1, Ordering::Relaxed);
+            });
+        mock_broadcaster
+            .expect_send_msg_to_player_ref()
+            .returning(|_, _| ());
+        mock_broadcaster.expect_send_to_player().returning(|_, _| ());
+        mock_repo.expect_exists_by_name().returning(|_| Ok(false));
+        mock_repo.expect_create().returning(|_, _, _, _| Ok(()));
+        mock_repo.expect_add_member().returning(|_| Ok(()));
+
+        let system = create_test_system(mock_repo, mock_broadcaster);
+        let leader = test_player_guid(100);
+        let member = test_player_guid(101);
+        system
+            .create_guild_from_petition(leader, "Leader".to_string(), "Dawn".to_string())
+            .await
+            .unwrap();
+        let guild_id = system.get_player_guild(leader).unwrap().guild_id.unwrap();
+
+        system
+            .join_guild(guild_id, member, "Member".to_string())
+            .await
+            .unwrap();
+
+        let guild = system.get_guild(guild_id).unwrap();
+        assert_eq!(guild.members.get(&member).map(|m| m.name.as_str()), Some("Member"));
+        assert_eq!(membership_updates.load(Ordering::Relaxed), 2);
+    }
+
+    #[tokio::test]
     async fn test_create_guild_name_too_long_sends_error() {
         let mock_repo = MockGuildRepositoryTrait::new();
         let mut mock_broadcaster = MockBroadcastManagerTrait::new();
+        // Membership shows on the character for those around.
+        mock_broadcaster
+            .expect_broadcast_msg_nearby()
+            .returning(|_, _, _| ());
 
         // Should send error packet
         mock_broadcaster
@@ -754,6 +802,10 @@ mod integration_tests {
     async fn test_create_guild_name_exists_sends_error() {
         let mut mock_repo = MockGuildRepositoryTrait::new();
         let mut mock_broadcaster = MockBroadcastManagerTrait::new();
+        // Membership shows on the character for those around.
+        mock_broadcaster
+            .expect_broadcast_msg_nearby()
+            .returning(|_, _, _| ());
 
         mock_repo
             .expect_exists_by_name()
@@ -813,6 +865,10 @@ mod integration_tests {
     async fn test_guild_creation_verifies_packet_count() {
         let mut mock_repo = MockGuildRepositoryTrait::new();
         let mut mock_broadcaster = MockBroadcastManagerTrait::new();
+        // Membership shows on the character for those around.
+        mock_broadcaster
+            .expect_broadcast_msg_nearby()
+            .returning(|_, _, _| ());
 
         mock_repo.expect_exists_by_name().returning(|_| Ok(false));
 
@@ -843,6 +899,10 @@ mod integration_tests {
     async fn test_player_already_in_guild_sends_error() {
         let mock_repo = MockGuildRepositoryTrait::new();
         let mut mock_broadcaster = MockBroadcastManagerTrait::new();
+        // Membership shows on the character for those around.
+        mock_broadcaster
+            .expect_broadcast_msg_nearby()
+            .returning(|_, _, _| ());
 
         let leader_guid = test_player_guid(100);
 
@@ -861,6 +921,9 @@ mod integration_tests {
     async fn test_create_multiple_guilds_sequential_ids() {
         let mut mock_repo1 = MockGuildRepositoryTrait::new();
         let mut mock_broadcaster1 = MockBroadcastManagerTrait::new();
+        mock_broadcaster1
+            .expect_broadcast_msg_nearby()
+            .returning(|_, _, _| ());
 
         mock_repo1.expect_exists_by_name().returning(|_| Ok(false));
         mock_repo1.expect_create().returning(|_, _, _, _| Ok(()));
@@ -892,6 +955,10 @@ mod integration_tests {
     async fn test_verify_opcode_sent_on_success() {
         let mut mock_repo = MockGuildRepositoryTrait::new();
         let mut mock_broadcaster = MockBroadcastManagerTrait::new();
+        // Membership shows on the character for those around.
+        mock_broadcaster
+            .expect_broadcast_msg_nearby()
+            .returning(|_, _, _| ());
 
         mock_repo.expect_exists_by_name().returning(|_| Ok(false));
 
@@ -927,6 +994,10 @@ mod integration_tests {
     async fn test_verify_opcode_sent_on_error() {
         let mut mock_repo = MockGuildRepositoryTrait::new();
         let mut mock_broadcaster = MockBroadcastManagerTrait::new();
+        // Membership shows on the character for those around.
+        mock_broadcaster
+            .expect_broadcast_msg_nearby()
+            .returning(|_, _, _| ());
 
         mock_repo
             .expect_exists_by_name()
