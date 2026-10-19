@@ -131,9 +131,7 @@ impl GossipSystem {
                 .unwrap_or(0);
         }
         self.creature_mgr
-            .with_creature(source, |c| c.entry)
-            .and_then(|entry| self.creature_mgr.get_template(entry))
-            .map(|t| t.gossip_menu_id)
+            .with_creature(source, |c| c.gossip_menu_id)
             .unwrap_or(0)
     }
 

@@ -2235,6 +2235,7 @@ mod tests {
             dynamic_flags: 0,
             stand_state: 0,
             npc_flags: 0,
+            gossip_menu_id: 0,
             armor: 0,
             damage_min: 0,
             damage_max: 0,

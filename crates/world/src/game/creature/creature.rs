@@ -72,6 +72,8 @@ pub struct Creature {
     pub stand_state: u8,
     /// NPC flags (vendor, trainer, etc.)
     pub npc_flags: u32,
+    /// The gossip menu this creature opens with; scripts can swap it.
+    pub gossip_menu_id: u32,
     /// Armor value (from classlevelstats * armor_multiplier)
     pub armor: u32,
     /// Minimum melee damage (from classlevelstats * damage_multiplier)
@@ -250,6 +252,7 @@ impl Creature {
             dynamic_flags: 0,
             stand_state: 0,
             npc_flags: template.npc_flags,
+            gossip_menu_id: template.gossip_menu_id,
             armor,
             damage_min,
             damage_max,

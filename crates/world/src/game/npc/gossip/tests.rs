@@ -684,3 +684,27 @@ async fn flight_master_greeting_teaches_node_instead_of_a_menu() {
     assert!(discovered);
     assert!(!opcodes(&sent(&mut rx)).contains(&Opcode::SMSG_GOSSIP_MESSAGE));
 }
+
+// ========== MENU OVERRIDE ==========
+
+#[tokio::test]
+async fn script_command_swaps_the_creature_menu() {
+    use crate::game::db_scripts::{commands::SCRIPT_COMMAND_SET_GOSSIP_MENU, run_step, ScriptInfo};
+    let world = test_world();
+    let (player, _rx) = add_player(&world, 1);
+    let npc = add_npc(&world, NPC_FLAG_GOSSIP);
+    let gossip = &world.systems.gossip_manager;
+    gossip.add_menu(menu_row(MENU + 5, 1, 0));
+    gossip.add_menu_item(option(MENU + 5, 0, gossip_option::GOSSIP, NPC_FLAG_GOSSIP, 0));
+
+    let mut step = ScriptInfo {
+        command: SCRIPT_COMMAND_SET_GOSSIP_MENU,
+        ..ScriptInfo::default()
+    };
+    step.datalong[0] = MENU + 5;
+    run_step(&world, &step, Some(npc), Some(player));
+
+    assert_eq!(world.systems.gossip.default_menu_id(&world, npc), MENU + 5);
+    world.systems.gossip.gossip_hello(&world, player, npc).await.unwrap();
+    assert_eq!(shown_texts(&world, player), vec!["option 0"]);
+}

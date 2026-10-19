@@ -69,6 +69,7 @@ pub const SCRIPT_COMMAND_SUMMON_OBJECT: u32 = 76;
 pub const SCRIPT_COMMAND_SET_GO_STATE: u32 = 80;
 pub const SCRIPT_COMMAND_DESPAWN_GAMEOBJECT: u32 = 81;
 pub const SCRIPT_COMMAND_QUEST_CREDIT: u32 = 83;
+pub const SCRIPT_COMMAND_SET_GOSSIP_MENU: u32 = 84;
 pub const SCRIPT_COMMAND_SEND_SCRIPT_EVENT: u32 = 85;
 
 /// Motion types as scripts number them.
@@ -823,6 +824,16 @@ pub fn execute(world: &World, info: &ScriptInfo, source: Option<ObjectGuid>, tar
                 return fail;
             };
             world.systems.quest.handle_kill_credit(player, object.entry(), object);
+            false
+        }
+        SCRIPT_COMMAND_SET_GOSSIP_MENU => {
+            let Some(source) = creature(source) else {
+                return fail;
+            };
+            world
+                .managers
+                .creature_mgr
+                .with_creature_mut(source, |c| c.gossip_menu_id = d[0]);
             false
         }
         SCRIPT_COMMAND_SEND_SCRIPT_EVENT => {
