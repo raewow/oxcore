@@ -61,6 +61,8 @@ pub struct CreatureModelInfo {
     pub speed_walk: f32,
     /// Run speed rate multiplier (default 1.14286, actual speed = rate * 7.0)
     pub speed_run: f32,
+    /// 0 male, 1 female, 2 none.
+    pub gender: u8,
 }
 
 #[derive(Debug, Clone)]
@@ -637,15 +639,15 @@ impl CreatureManager {
 
     /// Load creature_display_info_addon from database (bounding_radius, combat_reach, speeds per display_id)
     pub async fn load_model_info(&self) -> Result<()> {
-        let rows: Result<Vec<(i64, f32, f32, f32, f32)>, _> = sqlx::query_as(
-            "SELECT display_id, bounding_radius, combat_reach, speed_walk, speed_run FROM creature_display_info_addon"
+        let rows: Result<Vec<(i64, f32, f32, f32, f32, i16)>, _> = sqlx::query_as(
+            "SELECT display_id, bounding_radius, combat_reach, speed_walk, speed_run, gender FROM creature_display_info_addon"
         )
         .fetch_all(self.world_db.as_ref())
         .await;
 
         match rows {
             Ok(rows) => {
-                for (display_id, bounding_radius, combat_reach, speed_walk, speed_run) in &rows {
+                for (display_id, bounding_radius, combat_reach, speed_walk, speed_run, gender) in &rows {
                     self.model_info.insert(
                         checked_u32(*display_id, "creature_display_info_addon.display_id")?,
                         CreatureModelInfo {
@@ -665,6 +667,7 @@ impl CreatureManager {
                             } else {
                                 1.14286
                             },
+                            gender: u8::try_from(*gender).unwrap_or(2),
                         },
                     );
                 }

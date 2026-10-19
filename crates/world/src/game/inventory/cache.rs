@@ -196,6 +196,40 @@ impl PlayerInventoryData {
             .sum()
     }
 
+    /// Count of `entry_id` the player carries (equipped, backpack, bags, keyring), plus the
+    /// bank when `include_bank` is set. Bought-back items never count.
+    pub fn count_carried_by_entry(&self, entry_id: u32, include_bank: bool) -> u32 {
+        use oxcore_shared::game::inventory::{
+            BANK_SLOT_BAG_END, BANK_SLOT_BAG_START, BANK_SLOT_ITEM_START, BUYBACK_SLOT_END,
+            BUYBACK_SLOT_START,
+        };
+        self.items
+            .iter()
+            .filter_map(|pair| {
+                let item = pair.value().read();
+                if item.entry != entry_id {
+                    return None;
+                }
+                let in_backpack = item.bag == INVENTORY_SLOT_BAG_0;
+                if in_backpack && (BUYBACK_SLOT_START..BUYBACK_SLOT_END).contains(&item.slot) {
+                    return None;
+                }
+                let in_bank = (in_backpack
+                    && (BANK_SLOT_ITEM_START..BANK_SLOT_BAG_END).contains(&item.slot))
+                    || (BANK_SLOT_BAG_START..BANK_SLOT_BAG_END).contains(&item.bag);
+                (include_bank || !in_bank).then_some(item.count)
+            })
+            .sum()
+    }
+
+    /// Whether an item of `entry_id` is in an equipment slot.
+    pub fn has_equipped_entry(&self, entry_id: u32) -> bool {
+        self.equipment
+            .iter()
+            .flatten()
+            .any(|guid| self.get_item_entry(*guid) == entry_id)
+    }
+
     pub fn get_item_entry(&self, item_guid: ObjectGuid) -> u32 {
         self.items
             .get(&item_guid)
@@ -510,6 +544,24 @@ impl InventoryCache {
             .get(&player_guid)
             .map(|inv| inv.count_items_by_entry(entry_id))
             .unwrap_or(0)
+    }
+
+    pub fn count_carried_by_entry(
+        &self,
+        player_guid: ObjectGuid,
+        entry_id: u32,
+        include_bank: bool,
+    ) -> u32 {
+        self.player_inventories
+            .get(&player_guid)
+            .map(|inv| inv.count_carried_by_entry(entry_id, include_bank))
+            .unwrap_or(0)
+    }
+
+    pub fn has_equipped_entry(&self, player_guid: ObjectGuid, entry_id: u32) -> bool {
+        self.player_inventories
+            .get(&player_guid)
+            .is_some_and(|inv| inv.has_equipped_entry(entry_id))
     }
 
     pub fn get_item_info(

@@ -121,6 +121,81 @@ impl ConditionManager {
                 })
                 .unwrap_or(false),
             1 => has_aura(context.target, entry.values[0] as u32, world),
+            2 => carried_count(context.target, entry.values[0] as u32, false, world)
+                >= entry.values[1].max(1) as u32,
+            3 => context.target.is_player()
+                && world
+                    .systems
+                    .inventory
+                    .cache()
+                    .has_equipped_entry(context.target, entry.values[0] as u32),
+            5 => reputation_rank(context.target, entry.values[0] as u32, world)
+                .is_some_and(|rank| rank >= entry.values[1]),
+            7 => skill_value(context.target, entry.values[0] as u16, world)
+                .is_some_and(|value| i32::from(value) >= entry.values[1]),
+            14 => world
+                .managers
+                .player_mgr
+                .with_player(context.target, |p| {
+                    let race_mask = 1i32 << (i32::from(p.race) - 1).max(0);
+                    let class_mask = 1i32 << (i32::from(p.class) - 1).max(0);
+                    (entry.values[0] == 0 || race_mask & entry.values[0] != 0)
+                        && (entry.values[1] == 0 || class_mask & entry.values[1] != 0)
+                })
+                .unwrap_or(false),
+            17 => world
+                .managers
+                .player_mgr
+                .with_player(context.target, |p| {
+                    let known = p.spells.knows_spell(entry.values[0] as u32);
+                    match entry.values[1] {
+                        0 => known,
+                        1 => !known,
+                        _ => false,
+                    }
+                })
+                .unwrap_or(false),
+            19 => context.target.is_player()
+                && world
+                    .systems
+                    .quest
+                    .manager
+                    .get_quest_template(entry.values[0] as u32)
+                    .is_some_and(|quest| {
+                        world.systems.quest.can_take_quest(context.target, &quest, world)
+                    }),
+            22 => world
+                .managers
+                .player_mgr
+                .with_player(context.target, |p| {
+                    let quest_id = entry.values[0] as u32;
+                    !p.rewarded_quests.contains(&quest_id)
+                        && !p.active_quests.iter().any(|q| q.quest_id == quest_id)
+                })
+                .unwrap_or(false),
+            23 => carried_count(context.target, entry.values[0] as u32, true, world)
+                >= entry.values[1].max(1) as u32,
+            27 => unit_gender(context.target, world).is_some_and(|g| i32::from(g) == entry.values[0]),
+            29 => context.target.is_player()
+                && match skill_value(context.target, entry.values[0] as u16, world) {
+                    None => entry.values[1] == 1,
+                    Some(value) => entry.values[1] != 1 && i32::from(value) < entry.values[1],
+                },
+            30 => reputation_rank(context.target, entry.values[0] as u32, world)
+                .is_some_and(|rank| rank <= entry.values[1]),
+            45 => context.target.is_player() && world.systems.group.is_in_group(context.target),
+            50 => match spawned_gameobject(entry.values[0] as u32, context, world) {
+                Some(gameobject) => self.evaluate(
+                    entry.values[1] as u32,
+                    ConditionContext {
+                        target: gameobject,
+                        source: context.source,
+                    },
+                    world,
+                    visiting,
+                ),
+                None => false,
+            },
             4 => player_zone(context.source, world)
                 .or_else(|| player_zone(context.target, world))
                 .is_some_and(|zone| zone == entry.values[0] as u32),
@@ -309,6 +384,76 @@ fn has_aura(guid: ObjectGuid, spell_id: u32, world: &World) -> bool {
     }
 }
 
+fn carried_count(guid: ObjectGuid, entry: u32, include_bank: bool, world: &World) -> u32 {
+    if !guid.is_player() {
+        return 0;
+    }
+    world
+        .systems
+        .inventory
+        .cache()
+        .count_carried_by_entry(guid, entry, include_bank)
+}
+
+/// The player's rank with a faction, falling back to the race's starting standing
+/// for factions the player has no entry for.
+fn reputation_rank(guid: ObjectGuid, faction_id: u32, world: &World) -> Option<i32> {
+    use oxcore_shared::game::reputation::ReputationRank;
+    if !guid.is_player() {
+        return None;
+    }
+    if let Some(rank) = world.systems.reputation.get_rank(guid, faction_id, world) {
+        return Some(rank as i32);
+    }
+    let (race, class) = world
+        .managers
+        .player_mgr
+        .with_player(guid, |p| (p.race, p.class))?;
+    let base = world
+        .dbc
+        .read()
+        .get_faction(faction_id)
+        .map(|f| f.get_base_reputation(race, class))?;
+    Some(ReputationRank::from_value(base) as i32)
+}
+
+fn skill_value(guid: ObjectGuid, skill_id: u16, world: &World) -> Option<u16> {
+    if !guid.is_player() {
+        return None;
+    }
+    world.systems.skills.get_skill_value(guid, skill_id, world)
+}
+
+fn unit_gender(guid: ObjectGuid, world: &World) -> Option<u8> {
+    if guid.is_player() {
+        return world.managers.player_mgr.with_player(guid, |p| p.gender);
+    }
+    let display_id = world
+        .managers
+        .creature_mgr
+        .with_creature(guid, |c| c.display_id)?;
+    world
+        .managers
+        .creature_mgr
+        .get_model_info(display_id)
+        .map(|info| info.gender)
+}
+
+/// A game object by database guid in the same map copy as the source (or target).
+fn spawned_gameobject(spawn_id: u32, context: ConditionContext, world: &World) -> Option<ObjectGuid> {
+    let (map_id, instance_id) =
+        object_map(context.source, world).or_else(|| object_map(context.target, world))?;
+    world
+        .managers
+        .gameobject_mgr
+        .iter_gameobjects()
+        .find(|e| {
+            let go = e.value();
+            go.spawn_id == spawn_id && go.map_id == map_id && go.instance_id == instance_id
+        })
+        .map(|e| *e.key())
+}
+
 fn player_zone(guid: ObjectGuid, world: &World) -> Option<u32> {
     world.managers.player_mgr.with_player(guid, |p| p.zone_id)
 }
@@ -423,4 +568,144 @@ fn nearby_player(around: ObjectGuid, mode: i32, radius: f32, world: &World) -> b
                 _ => false,
             }
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game::inventory::PlayerInventoryData;
+    use crate::game::items::Item;
+    use crate::game::player::player::Player;
+    use crate::Config;
+    use oxcore_db::database::Databases;
+    use parking_lot::RwLock;
+    use sqlx::postgres::PgPoolOptions;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    fn test_world() -> World {
+        let pool = || {
+            PgPoolOptions::new()
+                .connect_lazy("postgres://test:test@localhost/test")
+                .expect("lazy pool should be constructible")
+        };
+        World::new(
+            Arc::new(Databases {
+                world: pool(),
+                character: pool(),
+                auth: pool(),
+                logs: oxcore_db::database::lazy_logs_pool(),
+            }),
+            Arc::new(Config::default()),
+            50,
+            PathBuf::from("."),
+        )
+    }
+
+    /// A level-10 player of the given race and class, with an empty inventory.
+    fn add_player(world: &World, race: u8, class: u8) -> ObjectGuid {
+        let guid = ObjectGuid::new_player(1);
+        let player = Player::new(guid, "Tester".to_string(), 0, 0, 1, 10, race, class, 0);
+        world.managers.player_mgr.add_player(player, 1);
+        world
+            .systems
+            .inventory
+            .cache()
+            .add_player_inventory(PlayerInventoryData::new(guid));
+        guid
+    }
+
+    fn add_item(world: &World, player: ObjectGuid, counter: u32, entry: u32, bag: u8, slot: u8) {
+        let item = Item::new(
+            ObjectGuid::new_item(counter),
+            entry,
+            1,
+            player,
+            slot,
+            bag,
+            0,
+            0,
+            0,
+            Vec::new(),
+            0,
+            None,
+            None,
+            0,
+            [0; 5],
+        );
+        world
+            .systems
+            .inventory
+            .cache()
+            .add_item(player, Arc::new(RwLock::new(item)));
+    }
+
+    fn check(world: &World, kind: i8, values: [i32; 4], player: ObjectGuid) -> bool {
+        world.managers.condition_mgr.add_for_test(
+            900,
+            ConditionEntry {
+                kind,
+                values,
+                flags: 0,
+            },
+        );
+        world.managers.condition_mgr.is_satisfied(
+            900,
+            ConditionContext {
+                target: player,
+                source: player,
+            },
+            world,
+        )
+    }
+
+    #[tokio::test]
+    async fn race_class_masks_match_the_player() {
+        let world = test_world();
+        let player = add_player(&world, 2, 3); // orc hunter
+        assert!(check(&world, 14, [0b10, 0, 0, 0], player));
+        assert!(check(&world, 14, [0, 0b100, 0, 0], player));
+        assert!(!check(&world, 14, [0b1, 0, 0, 0], player));
+        assert!(!check(&world, 14, [0b10, 0b1, 0, 0], player));
+    }
+
+    #[tokio::test]
+    async fn quest_none_fails_once_taken_or_rewarded() {
+        let world = test_world();
+        let player = add_player(&world, 1, 1);
+        assert!(check(&world, 22, [77, 0, 0, 0], player));
+        world.managers.player_mgr.with_player_mut(player, |p| {
+            p.rewarded_quests.insert(77);
+        });
+        assert!(!check(&world, 22, [77, 0, 0, 0], player));
+    }
+
+    #[tokio::test]
+    async fn spell_condition_checks_known_and_unknown() {
+        let world = test_world();
+        let player = add_player(&world, 1, 1);
+        assert!(check(&world, 17, [133, 1, 0, 0], player));
+        world.managers.player_mgr.with_player_mut(player, |p| {
+            p.spells.learn_spell(133);
+        });
+        assert!(check(&world, 17, [133, 0, 0, 0], player));
+        assert!(!check(&world, 17, [133, 1, 0, 0], player));
+    }
+
+    #[tokio::test]
+    async fn banked_items_count_only_with_bank() {
+        use oxcore_shared::game::inventory::{BANK_SLOT_ITEM_START, BUYBACK_SLOT_START};
+        let world = test_world();
+        let player = add_player(&world, 1, 1);
+        add_item(&world, player, 1, 6948, INVENTORY_BAG, BANK_SLOT_ITEM_START);
+        add_item(&world, player, 2, 6948, INVENTORY_BAG, BUYBACK_SLOT_START);
+        assert!(!check(&world, 2, [6948, 1, 0, 0], player));
+        assert!(check(&world, 23, [6948, 1, 0, 0], player));
+        assert!(!check(&world, 23, [6948, 2, 0, 0], player));
+
+        add_item(&world, player, 3, 6948, INVENTORY_BAG, 23);
+        assert!(check(&world, 2, [6948, 1, 0, 0], player));
+    }
+
+    const INVENTORY_BAG: u8 = 255;
 }
