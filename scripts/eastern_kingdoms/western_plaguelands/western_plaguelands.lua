@@ -132,69 +132,65 @@ local SPELL_DIVINE_SHIELD    = 13874
 local SPELL_HOLY_LIGHT       = 15493
 local SPELL_SHIELD_SLAM      = 15655
 
+local TIMER_ARCANE_BLAST  = 1
+local TIMER_DIVINE_SHIELD = 2
+local TIMER_HOLY_LIGHT    = 3
+local TIMER_SHIELD_SLAM   = 4
+
 local npc_highprotectorlorik = {}
 
-function npc_highprotectorlorik:OnSpawn(self, npc_guid)
-    self.arcane_blast_timer  = 7000
-    self.divine_shield_timer = 2000
-    self.holy_light_timer    = 2000
-    self.shield_slam_timer   = 2000
-    return {}
+local function lorik_start()
+    return {
+        { action = "SET_TIMER", timer_id = TIMER_ARCANE_BLAST,  duration = 7000 },
+        { action = "SET_TIMER", timer_id = TIMER_DIVINE_SHIELD, duration = 2000 },
+        { action = "SET_TIMER", timer_id = TIMER_HOLY_LIGHT,    duration = 2000 },
+        { action = "SET_TIMER", timer_id = TIMER_SHIELD_SLAM,   duration = 2000 },
+    }
 end
 
-function npc_highprotectorlorik:OnReset(self, npc_guid)
-    self.arcane_blast_timer  = 7000
-    self.divine_shield_timer = 2000
-    self.holy_light_timer    = 2000
-    self.shield_slam_timer   = 2000
-    return {}
+function npc_highprotectorlorik:OnSpawn(input)
+    return lorik_start()
 end
 
-function npc_highprotectorlorik:OnUpdate(self, npc_guid, diff_ms, input)
+function npc_highprotectorlorik:OnReset(input)
+    return lorik_start()
+end
+
+function npc_highprotectorlorik:OnUpdate(input)
     local actions = {}
 
     -- Always maintain Retribution Aura
     if not input:HasAura(SPELL_RETRIBUTION_AURA) then
         table.insert(actions, { action = "CAST_SPELL", spell_id = SPELL_RETRIBUTION_AURA,
-            triggered = true })
+            target = "self", triggered = true })
     end
 
     if not input.is_in_combat or not input.current_target then
         return actions
     end
 
-    -- Divine Shield at <15% HP
-    self.divine_shield_timer = self.divine_shield_timer - diff_ms
-    if self.divine_shield_timer <= 0 and input.health_pct <= 15.0 then
-        table.insert(actions, { action = "CAST_SPELL", spell_id = SPELL_DIVINE_SHIELD })
-        self.divine_shield_timer = 45000
-    elseif self.divine_shield_timer <= 0 then
-        self.divine_shield_timer = 0  -- wait until HP threshold
+    -- Divine Shield at <15% HP; once ready it waits for the threshold
+    if input:IsTimerReady(TIMER_DIVINE_SHIELD) and input.health_pct <= 15.0 then
+        table.insert(actions, { action = "CAST_SPELL", spell_id = SPELL_DIVINE_SHIELD, target = "self" })
+        table.insert(actions, { action = "SET_TIMER", timer_id = TIMER_DIVINE_SHIELD, duration = 45000 })
     end
 
-    -- Arcane Blast
-    self.arcane_blast_timer = self.arcane_blast_timer - diff_ms
-    if self.arcane_blast_timer <= 0 then
-        table.insert(actions, { action = "CAST_SPELL", spell_id = SPELL_ARCANE_BLAST,
-            target_guid = input.current_target })
-        self.arcane_blast_timer = 10000 + math.floor(math.random() * 2000)
+    if input:IsTimerReady(TIMER_ARCANE_BLAST) then
+        table.insert(actions, { action = "CAST_SPELL", spell_id = SPELL_ARCANE_BLAST, target = "current_target" })
+        table.insert(actions, { action = "SET_TIMER", timer_id = TIMER_ARCANE_BLAST,
+            duration = 10000 + math.floor(math.random() * 2000) })
     end
 
-    -- Holy Light (self-heal at <60% HP)
-    self.holy_light_timer = self.holy_light_timer - diff_ms
-    if self.holy_light_timer <= 0 and input.health_pct <= 60.0 then
-        table.insert(actions, { action = "CAST_SPELL", spell_id = SPELL_HOLY_LIGHT })
-        self.holy_light_timer = 2000 + math.floor(math.random() * 4000)
-    elseif self.holy_light_timer <= 0 then
-        self.holy_light_timer = 0
+    -- Holy Light (self-heal at <60% HP); once ready it waits for the threshold
+    if input:IsTimerReady(TIMER_HOLY_LIGHT) and input.health_pct <= 60.0 then
+        table.insert(actions, { action = "CAST_SPELL", spell_id = SPELL_HOLY_LIGHT, target = "self" })
+        table.insert(actions, { action = "SET_TIMER", timer_id = TIMER_HOLY_LIGHT,
+            duration = 2000 + math.floor(math.random() * 4000) })
     end
 
-    -- Shield Slam (when target is casting)
-    self.shield_slam_timer = self.shield_slam_timer - diff_ms
-    if self.shield_slam_timer <= 0 then
-        table.insert(actions, { action = "CAST_SPELL", spell_id = SPELL_SHIELD_SLAM,
-            target_guid = input.current_target })
-        self.shield_slam_timer = 9000
+    if input:IsTimerReady(TIMER_SHIELD_SLAM) then
+        table.insert(actions, { action = "CAST_SPELL", spell_id = SPELL_SHIELD_SLAM, target = "current_target" })
+        table.insert(actions, { action = "SET_TIMER", timer_id = TIMER_SHIELD_SLAM, duration = 9000 })
     end
 
     return actions

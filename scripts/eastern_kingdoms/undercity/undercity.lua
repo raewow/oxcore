@@ -17,83 +17,79 @@ local SPELL_BLACK_ARROW = 20733
 local SPELL_MULTI_SHOT  = 20735
 local SPELL_SHOOT       = 20463
 
+local TIMER_SUMMON_SKEL = 1
+local TIMER_FADE        = 2
+local TIMER_FADED       = 3   -- kiting at range after Fade
+local TIMER_BLACK_ARROW = 4
+local TIMER_MULTI_SHOT  = 5
+local TIMER_SHOOT       = 6
+
 local npc_sylvanas = {}
 
-function npc_sylvanas:OnSpawn(self, npc_guid)
-    self.summon_skel_timer = 25000
-    self.fade_timer        = 50000
-    self.faded_timer       = 0
-    self.black_arrow_timer = 15000
-    self.multi_shot_timer  = 10000
-    self.shoot_timer       = 10000
-    return {}
+local function initial_timers()
+    return {
+        { action = "SET_TIMER", timer_id = TIMER_SUMMON_SKEL, duration = 25000 },
+        { action = "SET_TIMER", timer_id = TIMER_FADE,        duration = 50000 },
+        { action = "SET_TIMER", timer_id = TIMER_FADED,       duration = 0 },
+        { action = "SET_TIMER", timer_id = TIMER_BLACK_ARROW, duration = 15000 },
+        { action = "SET_TIMER", timer_id = TIMER_MULTI_SHOT,  duration = 10000 },
+        { action = "SET_TIMER", timer_id = TIMER_SHOOT,       duration = 10000 },
+    }
 end
 
-function npc_sylvanas:OnReset(self, npc_guid)
-    self.summon_skel_timer = 25000
-    self.fade_timer        = 50000
-    self.faded_timer       = 0
-    self.black_arrow_timer = 15000
-    self.multi_shot_timer  = 10000
-    self.shoot_timer       = 10000
-    return {}
+function npc_sylvanas:OnSpawn(input)
+    return initial_timers()
 end
 
-function npc_sylvanas:OnEnterCombat(self, npc_guid, target_guid)
+function npc_sylvanas:OnReset(input)
+    return initial_timers()
+end
+
+function npc_sylvanas:OnEnterCombat(input)
     return { { action = "PLAY_SOUND", sound_id = 5886, zone_wide = false } }
 end
 
-function npc_sylvanas:OnUpdate(self, npc_guid, diff_ms, input)
-    local actions = {}
-
+function npc_sylvanas:OnUpdate(input)
     -- Faded kite phase (stay at range 30yd for 5s after Fade)
-    if self.faded_timer and self.faded_timer > 0 then
-        self.faded_timer = self.faded_timer - diff_ms
-        if self.faded_timer <= 0 then
-            self.faded_timer = 0
-        end
-        return {}  -- skip other actions while kiting
+    if not input:IsTimerReady(TIMER_FADED) then
+        return {}
     end
 
     if not input.is_in_combat or not input.current_target then
         return {}
     end
 
-    self.summon_skel_timer = self.summon_skel_timer - diff_ms
-    if self.summon_skel_timer <= 0 then
-        table.insert(actions, { action = "CAST_SPELL", spell_id = SPELL_SUMMON_SKEL })
-        self.summon_skel_timer = 25000
+    local actions = {}
+
+    if input:IsTimerReady(TIMER_SUMMON_SKEL) then
+        table.insert(actions, { action = "CAST_SPELL", spell_id = SPELL_SUMMON_SKEL, target = "self" })
+        table.insert(actions, { action = "SET_TIMER", timer_id = TIMER_SUMMON_SKEL, duration = 25000 })
     end
 
-    self.fade_timer = self.fade_timer - diff_ms
-    if self.fade_timer <= 0 then
-        table.insert(actions, { action = "CAST_SPELL", spell_id = SPELL_FADE })
-        self.fade_timer        = 50000
-        self.faded_timer       = 5000
-        self.black_arrow_timer = 0
-        self.multi_shot_timer  = 0
-        self.shoot_timer       = 0
+    if input:IsTimerReady(TIMER_FADE) then
+        -- After the kite every ranged attack fires at once.
+        table.insert(actions, { action = "CAST_SPELL", spell_id = SPELL_FADE, target = "self" })
+        table.insert(actions, { action = "SET_TIMER", timer_id = TIMER_FADE,        duration = 50000 })
+        table.insert(actions, { action = "SET_TIMER", timer_id = TIMER_FADED,       duration = 5000 })
+        table.insert(actions, { action = "SET_TIMER", timer_id = TIMER_BLACK_ARROW, duration = 0 })
+        table.insert(actions, { action = "SET_TIMER", timer_id = TIMER_MULTI_SHOT,  duration = 0 })
+        table.insert(actions, { action = "SET_TIMER", timer_id = TIMER_SHOOT,       duration = 0 })
+        return actions
     end
 
-    self.black_arrow_timer = self.black_arrow_timer - diff_ms
-    if self.black_arrow_timer <= 0 then
-        table.insert(actions, { action = "CAST_SPELL", spell_id = SPELL_BLACK_ARROW,
-            target_guid = input.current_target })
-        self.black_arrow_timer = 15000
+    if input:IsTimerReady(TIMER_BLACK_ARROW) then
+        table.insert(actions, { action = "CAST_SPELL", spell_id = SPELL_BLACK_ARROW, target = "random_hostile" })
+        table.insert(actions, { action = "SET_TIMER", timer_id = TIMER_BLACK_ARROW, duration = 15000 })
     end
 
-    self.multi_shot_timer = self.multi_shot_timer - diff_ms
-    if self.multi_shot_timer <= 0 then
-        table.insert(actions, { action = "CAST_SPELL", spell_id = SPELL_MULTI_SHOT,
-            target_guid = input.current_target })
-        self.multi_shot_timer = 10000
+    if input:IsTimerReady(TIMER_MULTI_SHOT) then
+        table.insert(actions, { action = "CAST_SPELL", spell_id = SPELL_MULTI_SHOT, target = "random_hostile" })
+        table.insert(actions, { action = "SET_TIMER", timer_id = TIMER_MULTI_SHOT, duration = 10000 })
     end
 
-    self.shoot_timer = self.shoot_timer - diff_ms
-    if self.shoot_timer <= 0 then
-        table.insert(actions, { action = "CAST_SPELL", spell_id = SPELL_SHOOT,
-            target_guid = input.current_target })
-        self.shoot_timer = 10000
+    if input:IsTimerReady(TIMER_SHOOT) then
+        table.insert(actions, { action = "CAST_SPELL", spell_id = SPELL_SHOOT, target = "current_target" })
+        table.insert(actions, { action = "SET_TIMER", timer_id = TIMER_SHOOT, duration = 10000 })
     end
 
     return actions

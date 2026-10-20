@@ -16,42 +16,45 @@ local UNIT_DYNFLAG_DEAD     = 0x20
 
 local npc_henze_faulk = {}
 
-function npc_henze_faulk:OnSpawn(self, npc_guid)
+local TIMER_LIFE  = 1
+local DATA_HEALED = "healed"
+
+function npc_henze_faulk:OnSpawn(input)
     return {
+        { action = "SET_DYNFLAG",    flag  = UNIT_DYNFLAG_DEAD },
+        { action = "SET_STAND_STATE", state = 7 }, -- UNIT_STAND_STATE_DEAD
+        { action = "STOP_MOVEMENT" },
+    }
+end
+
+function npc_henze_faulk:OnReset(input)
+    return {
+        { action = "SET_CUSTOM_DATA", key = DATA_HEALED, value = 0 },
         { action = "SET_DYNFLAG",    flag  = UNIT_DYNFLAG_DEAD },
         { action = "SET_STAND_STATE", state = 7 },
         { action = "STOP_MOVEMENT" },
     }
 end
 
-function npc_henze_faulk:OnReset(self, npc_guid)
-    return {
-        { action = "SET_DYNFLAG",    flag  = UNIT_DYNFLAG_DEAD },
-        { action = "SET_STAND_STATE", state = 7 },
-        { action = "STOP_MOVEMENT" },
-    }
-end
-
-function npc_henze_faulk:OnSpellHit(self, npc_guid, spell_id, caster_guid)
-    if spell_id == SPELL_HEALING_TOUCH and not self.spell_hit then
-        self.spell_hit  = true
-        self.life_timer = 120000
-        return {
-            { action = "SET_STAND_STATE", state = 0 },
-            { action = "REMOVE_DYNFLAG",  flag  = UNIT_DYNFLAG_DEAD },
-            { action = "SAY", text_id = SAY_HEAL },
-        }
+function npc_henze_faulk:OnSpellHit(input, spell_id, caster_guid)
+    if spell_id ~= SPELL_HEALING_TOUCH or input:GetCustomData(DATA_HEALED) == 1 then
+        return {}
     end
-    return {}
+    return {
+        { action = "SET_CUSTOM_DATA", key = DATA_HEALED, value = 1 },
+        { action = "SET_TIMER", timer_id = TIMER_LIFE, duration = 120000 },
+        { action = "SET_STAND_STATE", state = 0 }, -- STAND
+        { action = "REMOVE_DYNFLAG",  flag  = UNIT_DYNFLAG_DEAD },
+        { action = "SCRIPT_TEXT", text_id = SAY_HEAL },
+    }
 end
 
-function npc_henze_faulk:OnUpdate(self, npc_guid, diff_ms, input)
-    if self.spell_hit then
-        self.life_timer = (self.life_timer or 120000) - diff_ms
-        if self.life_timer <= 0 then
-            self.spell_hit = false
-            return { { action = "ENTER_EVADE_MODE" } }
-        end
+function npc_henze_faulk:OnUpdate(input)
+    if input:GetCustomData(DATA_HEALED) == 1 and input:IsTimerReady(TIMER_LIFE) then
+        return {
+            { action = "SET_CUSTOM_DATA", key = DATA_HEALED, value = 0 },
+            { action = "ENTER_EVADE_MODE" },
+        }
     end
     return {}
 end

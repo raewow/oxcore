@@ -28,51 +28,60 @@ local SPELL_SERPENT_STING_8     = 13555
 local SPELL_SERPENT_STING_9     = 25295
 
 local EMOTE_ROAR = 11  -- EMOTE_ONESHOT_ROAR
+local EMOTE_POISON = 9786  -- broadcast text
+local DISPLAY_DOOMBRINGER = 2727
+
+local TIMER_TRANSFORM       = 1
+local TIMER_EMOTE           = 2
+local TIMER_DEMONIC_FRENZY  = 1
+local TIMER_DEMONIC_DOOM    = 2
+local TIMER_DESPAWN         = 3
+local DATA_TRANSFORMING     = "transforming"
+local DATA_ROARED           = "roared"
 
 local npc_artorius_amiable = {}
 
-function npc_artorius_amiable:OnSpawn(self, npc_guid)
-    self.transform        = false
-    self.transform_timer  = 10000
-    self.emote_timer      = 5000
-    return {}
+local function amiable_start()
+    return {
+        { action = "SET_CUSTOM_DATA", key = DATA_TRANSFORMING, value = 0 },
+        { action = "SET_CUSTOM_DATA", key = DATA_ROARED, value = 0 },
+    }
 end
 
-function npc_artorius_amiable:OnReset(self, npc_guid)
-    self.transform        = false
-    self.transform_timer  = 10000
-    self.emote_timer      = 5000
-    return {}
+function npc_artorius_amiable:OnSpawn(input)
+    return amiable_start()
+end
+
+function npc_artorius_amiable:OnReset(input)
+    return amiable_start()
 end
 
 -- Triggered by DB event / script event system
-function npc_artorius_amiable:OnProcessEventId(self, npc_guid, event_id, source_guid, is_start)
-    self.transform       = true
-    self.transform_timer = 10000
-    self.emote_timer     = 5000
-    return { { action = "STOP_MOVEMENT" } }
+function npc_artorius_amiable:OnProcessEventId(input, event_id, source_guid, is_start)
+    return {
+        { action = "SET_CUSTOM_DATA", key = DATA_TRANSFORMING, value = 1 },
+        { action = "SET_CUSTOM_DATA", key = DATA_ROARED, value = 0 },
+        { action = "SET_TIMER", timer_id = TIMER_TRANSFORM, duration = 10000 },
+        { action = "SET_TIMER", timer_id = TIMER_EMOTE,     duration = 5000 },
+        { action = "STOP_MOVEMENT" },
+    }
 end
 
-function npc_artorius_amiable:OnUpdate(self, npc_guid, diff_ms, input)
-    if not self.transform then return {} end
+function npc_artorius_amiable:OnUpdate(input)
+    if input:GetCustomData(DATA_TRANSFORMING) == 0 then return {} end
 
     local actions = {}
 
-    if self.emote_timer and self.emote_timer > 0 then
-        self.emote_timer = self.emote_timer - diff_ms
-        if self.emote_timer <= 0 then
-            self.emote_timer = 0
-            table.insert(actions, { action = "PLAY_EMOTE", emote_id = EMOTE_ROAR })
-        end
+    if input:GetCustomData(DATA_ROARED) == 0 and input:IsTimerReady(TIMER_EMOTE) then
+        table.insert(actions, { action = "SET_CUSTOM_DATA", key = DATA_ROARED, value = 1 })
+        table.insert(actions, { action = "EMOTE", emote_id = EMOTE_ROAR })
     end
 
-    self.transform_timer = self.transform_timer - diff_ms
-    if self.transform_timer <= 0 then
-        self.transform = false
-        -- Transform to Doombringer
-        table.insert(actions, { action = "MORPH", display_id = 0 }) -- server uses UpdateEntry; MORPH resets display
-        -- Note: full UpdateEntry (swapping NPC entry) is not yet a Lua action.
-        -- The transform visually approximates; full stat swap requires Phase E engine support.
+    if input:IsTimerReady(TIMER_TRANSFORM) then
+        table.insert(actions, { action = "SET_CUSTOM_DATA", key = DATA_TRANSFORMING, value = 0 })
+        -- Full UpdateEntry (swapping NPC entry) is not yet a Lua action: take on the
+        -- Doombringer's look without its stats.
+        table.insert(actions, { action = "MORPH", display_id = DISPLAY_DOOMBRINGER })
     end
 
     return actions
@@ -89,67 +98,70 @@ local function rand_range(lo, hi)
     return lo + math.floor(math.random() * (hi - lo + 1))
 end
 
-function npc_artorius_doombringer:OnSpawn(self, npc_guid)
-    self.demonic_frenzy_timer = rand_range(5000, 8000)
-    self.demonic_doom_timer   = 7500
-    self.despawn_timer        = 20 * 60 * 1000  -- 20 minutes
-    return {}
+local function doombringer_start()
+    return {
+        { action = "SET_TIMER", timer_id = TIMER_DEMONIC_FRENZY, duration = rand_range(5000, 8000) },
+        { action = "SET_TIMER", timer_id = TIMER_DEMONIC_DOOM,   duration = 7500 },
+        { action = "SET_TIMER", timer_id = TIMER_DESPAWN,        duration = 20 * 60 * 1000 },
+    }
 end
 
-function npc_artorius_doombringer:OnReset(self, npc_guid)
-    self.demonic_frenzy_timer = rand_range(5000, 8000)
-    self.demonic_doom_timer   = 7500
-    self.despawn_timer        = 20 * 60 * 1000
-    return {}
+function npc_artorius_doombringer:OnSpawn(input)
+    return doombringer_start()
 end
 
-function npc_artorius_doombringer:OnSpellHit(self, npc_guid, spell_id, caster_guid)
+function npc_artorius_doombringer:OnReset(input)
+    return doombringer_start()
+end
+
+function npc_artorius_doombringer:OnSpellHit(input, spell_id, caster_guid)
     -- Serpent Sting → Stinging Trauma
     if spell_id == SPELL_SERPENT_STING_8 or spell_id == SPELL_SERPENT_STING_9 then
         return {
-            { action = "CAST_SPELL", spell_id = SPELL_STINGING_TRAUMA, triggered = true },
-            { action = "PLAY_EMOTE", emote_id = 9786 }, -- EMOTE_POISON
+            { action = "CAST_SPELL", spell_id = SPELL_STINGING_TRAUMA, target = "self", triggered = true },
+            { action = "SCRIPT_TEXT", text_id = EMOTE_POISON },
         }
     end
     return {}
 end
 
-function npc_artorius_doombringer:OnUpdate(self, npc_guid, diff_ms, input)
-    local actions = {}
-
-    -- Out-of-combat despawn timer
+function npc_artorius_doombringer:OnUpdate(input)
+    -- Despawn after 20 minutes without a fight
     if not input.is_in_combat then
-        self.despawn_timer = (self.despawn_timer or 20*60*1000) - diff_ms
-        if self.despawn_timer <= 0 then
-            table.insert(actions, { action = "KILL_SELF" })
+        if input:IsTimerReady(TIMER_DESPAWN) then
+            return { { action = "KILL_SELF" } }
         end
-        return actions
+        return {}
     end
 
     if not input.current_target then return {} end
 
     -- If more than one unit on threat list, despawn (solo hunter only)
     if input.threat_list and #input.threat_list > 1 then
-        table.insert(actions, { action = "SPAWN_CREATURE",
-            entry = NPC_THE_CLEANER,
-            x = input.position.x, y = input.position.y, z = input.position.z,
-            summon_type = "TIMED_DESPAWN",
-            duration_ms = 20 * 60 * 1000 })
-        table.insert(actions, { action = "KILL_SELF" })
-        return actions
+        return {
+            { action = "SPAWN_CREATURE",
+              entry = NPC_THE_CLEANER,
+              x = input.position.x, y = input.position.y, z = input.position.z,
+              summon_type = "TIMED_DESPAWN",
+              duration = 20 * 60 * 1000 },
+            { action = "KILL_SELF" },
+        }
     end
 
-    self.demonic_frenzy_timer = self.demonic_frenzy_timer - diff_ms
-    if self.demonic_frenzy_timer <= 0 then
-        table.insert(actions, { action = "CAST_SPELL", spell_id = SPELL_DEMONIC_FRENZY })
-        self.demonic_frenzy_timer = rand_range(15000, 20000)
+    local actions = {
+        -- Fighting holds off the despawn: the 20 minutes start again once it ends.
+        { action = "SET_TIMER", timer_id = TIMER_DESPAWN, duration = 20 * 60 * 1000 },
+    }
+
+    if input:IsTimerReady(TIMER_DEMONIC_FRENZY) then
+        table.insert(actions, { action = "CAST_SPELL", spell_id = SPELL_DEMONIC_FRENZY, target = "self" })
+        table.insert(actions, { action = "SET_TIMER", timer_id = TIMER_DEMONIC_FRENZY,
+            duration = rand_range(15000, 20000) })
     end
 
-    self.demonic_doom_timer = self.demonic_doom_timer - diff_ms
-    if self.demonic_doom_timer <= 0 then
-        table.insert(actions, { action = "CAST_SPELL", spell_id = SPELL_DEMONIC_DOOM,
-            target_guid = input.current_target })
-        self.demonic_doom_timer = 7500
+    if input:IsTimerReady(TIMER_DEMONIC_DOOM) then
+        table.insert(actions, { action = "CAST_SPELL", spell_id = SPELL_DEMONIC_DOOM, target = "current_target" })
+        table.insert(actions, { action = "SET_TIMER", timer_id = TIMER_DEMONIC_DOOM, duration = 7500 })
     end
 
     return actions
@@ -165,22 +177,18 @@ local SPELL_UNSUMMON_YETI   = 17163
 
 local npc_umi_yeti = {}
 
-function npc_umi_yeti:OnMoveInLineOfSight(self, npc_guid, unit_guid, is_hostile)
+function npc_umi_yeti:MoveInLineOfSight(input, unit_guid, is_hostile)
     -- C++ override is empty; suppress aggro
     return {}
 end
 
-function npc_umi_yeti:OnSpellHit(self, npc_guid, spell_id, caster_guid)
+function npc_umi_yeti:OnSpellHit(input, spell_id, caster_guid)
     if spell_id == SPELL_UNSUMMON_YETI then
         return {
             { action = "STOP_MOVEMENT" },
             { action = "KILL_SELF" },
         }
     end
-    return {}
-end
-
-function npc_umi_yeti:OnUpdate(self, npc_guid, diff_ms, input)
     return {}
 end
 
