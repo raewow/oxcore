@@ -204,8 +204,12 @@ impl VMapFileLoader {
 
         let mut name_buf = vec![0u8; name_len as usize];
         file.read_exact(&mut name_buf)?;
+        // Doodad names are written with their C string terminator; left on, the `.vmo` lookup
+        // asks for a file that does not exist.
         let name = String::from_utf8(name_buf)
-            .map_err(|e| anyhow::anyhow!("Invalid UTF-8 in ModelSpawn name: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Invalid UTF-8 in ModelSpawn name: {}", e))?
+            .trim_end_matches('\0')
+            .to_string();
 
         Ok(Some(ModelSpawn {
             flags,
