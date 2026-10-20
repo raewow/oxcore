@@ -223,13 +223,19 @@ impl MovementSystem {
             })
             .flatten()
         {
-            if let Some(ground_z) =
-                world
-                    .managers
-                    .vmap_mgr
-                    .get_height(map_id, instance_id, pos.x, pos.y, pos.z + 5.0)
-            {
-                if (ground_z - pos.z).abs() < 3.0 {
+            // Only ground within 3 yards of the creature is taken, so the search from 5 yards
+            // above need not reach further down than that.
+            const SNAP_ABOVE: f32 = 5.0;
+            const SNAP_RANGE: f32 = 3.0;
+            if let Some(ground_z) = world.managers.vmap_mgr.get_height_within(
+                map_id,
+                instance_id,
+                pos.x,
+                pos.y,
+                pos.z + SNAP_ABOVE,
+                SNAP_ABOVE + SNAP_RANGE,
+            ) {
+                if (ground_z - pos.z).abs() < SNAP_RANGE {
                     world.managers.creature_mgr.with_creature_mut(guid, |c| {
                         c.position.z = ground_z;
                     });
