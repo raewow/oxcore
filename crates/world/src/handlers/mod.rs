@@ -35,6 +35,7 @@ pub mod reputation;
 pub mod settings;
 pub mod social;
 pub mod spells;
+pub mod stable;
 pub mod talent;
 pub mod taxi;
 pub mod ticket;
@@ -850,6 +851,24 @@ pub async fn dispatch_packet(
                 }
                 Opcode::CMSG_PET_ACTION => {
                     pet_action::handle_pet_action(session, packet, world).await?;
+                }
+                Opcode::CMSG_PET_ABANDON => {
+                    pet_action::handle_pet_abandon(session, packet, world).await?;
+                }
+                Opcode::MSG_LIST_STABLED_PETS => {
+                    stable::handle_list_stabled_pets(session, packet, world).await?;
+                }
+                Opcode::CMSG_STABLE_PET => {
+                    stable::handle_stable_pet(session, packet, world).await?;
+                }
+                Opcode::CMSG_UNSTABLE_PET => {
+                    stable::handle_unstable_pet(session, packet, world).await?;
+                }
+                Opcode::CMSG_STABLE_SWAP_PET => {
+                    stable::handle_stable_swap_pet(session, packet, world).await?;
+                }
+                Opcode::CMSG_BUY_STABLE_SLOT => {
+                    stable::handle_buy_stable_slot(session, packet, world).await?;
                 }
                 Opcode::CMSG_CANCEL_GROWTH_AURA => {
                     spells::handle_cancel_growth_aura(session, packet, world).await?;

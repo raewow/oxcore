@@ -444,7 +444,8 @@ pub async fn activate(
         .auras
         .remove_spells_causing_aura(player_guid, AURA_MOD_STEALTH, world)
         .await?;
-    world.systems.pet.dismiss(player_guid, world);
+    // The pet waits out the flight and comes back on landing.
+    crate::game::player::teleport::put_pet_away(world, player_guid);
     world
         .managers
         .player_mgr

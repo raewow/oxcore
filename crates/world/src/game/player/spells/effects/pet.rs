@@ -27,7 +27,17 @@ pub async fn effect_learn_pet_spell(input: &EffectInput, world: &World) -> Resul
 ///
 /// Dismiss the caster's pet.
 pub async fn effect_dismiss_pet(input: &EffectInput, world: &World) -> Result<EffectResult> {
-    world.systems.pet.dismiss(input.caster_guid, world);
+    // A tamed pet stays with the hunter, dismissed until called; a dead one stays put.
+    let pet = &world.systems.pet;
+    if pet.out_pet(input.caster_guid).is_some() {
+        pet.dismiss_to_slot(
+            input.caster_guid,
+            crate::game::pet::pet_slot::NOT_IN_SLOT,
+            world,
+        );
+    } else if pet.active_pet_alive(input.caster_guid) {
+        pet.dismiss(input.caster_guid, world);
+    }
 
     Ok(EffectResult::empty())
 }

@@ -44,14 +44,10 @@ pub async fn effect_tame_creature(input: &EffectInput, world: &World) -> Result<
     let Some(target_guid) = input.target_guid else {
         return Ok(EffectResult::empty());
     };
-    let Some(entry) = world
-        .managers
-        .creature_mgr
-        .with_creature(target_guid, |creature| creature.entry)
-    else {
-        return Ok(EffectResult::empty());
-    };
-    world.systems.pet.summon(input.caster_guid, entry, world)?;
+    world
+        .systems
+        .pet
+        .tame(input.caster_guid, target_guid, input.spell_id, world)?;
     if let Some((_, creature)) = world.managers.creature_mgr.remove_creature(target_guid) {
         if let Some(map) = world
             .managers
@@ -68,6 +64,16 @@ pub async fn effect_tame_creature(input: &EffectInput, world: &World) -> Result<
 ///
 /// Summon the caster's active pet.
 pub async fn effect_summon_pet(input: &EffectInput, world: &World) -> Result<EffectResult> {
+    // No creature named: a hunter calls back the pet that travels with them.
+    if input.misc_value == 0 {
+        if let Err(reason) = world.systems.pet.call_pet(input.caster_guid, world) {
+            world.managers.broadcast_mgr.send_msg_to_player(
+                input.caster_guid,
+                oxcore_shared::messages::stable::SmsgPetTameFailure { reason },
+            );
+        }
+        return Ok(EffectResult::empty());
+    }
     if input.misc_value > 0
         && world
             .systems

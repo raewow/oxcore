@@ -19,6 +19,7 @@ pub struct DbcManager {
     pub taxi_path_node: DbcStore<TaxiPathNodeEntry>,
     pub auction_house: DbcStore<AuctionHouseEntry>,
     pub bank_bag_slot_prices: DbcStore<BankBagSlotPricesEntry>,
+    pub stable_slot_prices: DbcStore<crate::StableSlotPricesEntry>,
     pub chr_classes: DbcStore<ChrClassesEntry>,
     pub chr_races: DbcStore<ChrRacesEntry>,
     pub creature_display_info: DbcStore<CreatureDisplayInfoEntry>,
@@ -67,6 +68,7 @@ impl DbcManager {
             taxi_path_node: DbcStore::new("iiiifffii"),
             auction_house: DbcStore::new("niiixxxxxxxxxxxxxx"),
             bank_bag_slot_prices: DbcStore::new("ni"),
+            stable_slot_prices: DbcStore::new("ni"),
             chr_classes: DbcStore::new(&chr_classes_format),
             chr_races: DbcStore::new(&chr_races_format),
             creature_display_info: DbcStore::new("nixifxxxxxxx"),
@@ -161,6 +163,11 @@ impl DbcManager {
             &mut self.bank_bag_slot_prices,
             dbc_path,
             "BankBagSlotPrices.dbc",
+        )?;
+        Self::load_dbc(
+            &mut self.stable_slot_prices,
+            dbc_path,
+            "StableSlotPrices.dbc",
         )?;
         Self::load_dbc(&mut self.chr_classes, dbc_path, "ChrClasses.dbc")?;
         Self::load_dbc(&mut self.chr_races, dbc_path, "ChrRaces.dbc")?;
@@ -280,6 +287,11 @@ impl DbcManager {
     /// Get bank bag slot price by ID
     pub fn get_bank_bag_price(&self, id: u32) -> Option<&BankBagSlotPricesEntry> {
         self.bank_bag_slot_prices.lookup(id)
+    }
+
+    /// What the stable slot with this number costs
+    pub fn get_stable_slot_price(&self, slot: u32) -> Option<u32> {
+        self.stable_slot_prices.lookup(slot).map(|e| e.price)
     }
 
     /// Get character class entry by ID

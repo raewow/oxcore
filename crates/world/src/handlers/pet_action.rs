@@ -68,7 +68,10 @@ pub async fn handle_pet_action(session: &WorldSession, packet: &mut WorldPacket,
                 ai::queue_event(world, pet_guid, AIEvent::Engage { target_guid: target });
             }
             COMMAND_ABANDON => {
-                world.systems.pet.dismiss(player_guid, world);
+                // Hunters dismiss their tamed pet with a spell instead.
+                if world.systems.pet.out_pet(player_guid).is_none() {
+                    world.systems.pet.dismiss(player_guid, world);
+                }
             }
             _ => {}
         },
@@ -119,4 +122,32 @@ mod tests {
         assert_eq!(data & 0xFF_FFFF, COMMAND_ATTACK);
         assert_eq!(read_target, target);
     }
+}
+
+/// Handle CMSG_PET_ABANDON: a tamed pet is given up for good, a summoned one dismissed.
+pub async fn handle_pet_abandon(
+    session: &WorldSession,
+    packet: &mut WorldPacket,
+    world: &World,
+) -> Result<()> {
+    let Some(player_guid) = session.player_guid() else {
+        return Ok(());
+    };
+    let Some(pet_guid) = packet.read_guid_for(session.protocol()) else {
+        return Ok(());
+    };
+    let active = world
+        .managers
+        .player_mgr
+        .with_player(player_guid, |p| p.active_pet)
+        .flatten();
+    if active != Some(pet_guid) {
+        return Ok(());
+    }
+    if world.systems.pet.out_pet(player_guid).is_some() {
+        world.systems.pet.abandon(player_guid, world);
+    } else {
+        world.systems.pet.dismiss(player_guid, world);
+    }
+    Ok(())
 }

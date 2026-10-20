@@ -768,6 +768,34 @@ impl SpellSystem {
             }
         }
 
+        // Taming is refused before the channel starts, with the reason on the pet bar.
+        const SPELL_EFFECT_TAME_CREATURE: u32 = 55;
+        let tames = world
+            .managers
+            .spell_mgr
+            .get(spell_id)
+            .is_some_and(|s| s.effect.contains(&SPELL_EFFECT_TAME_CREATURE));
+        if tames && !is_triggered {
+            if let Some(reason) = world
+                .systems
+                .pet
+                .taming_failure(caster_guid, cast_targets.unit_target())
+            {
+                world.managers.broadcast_mgr.send_msg_to_player(
+                    caster_guid,
+                    oxcore_shared::messages::stable::SmsgPetTameFailure { reason },
+                );
+                self.send_cast_result_with_cast_id(
+                    caster_guid,
+                    spell_id,
+                    SpellCastError::DontReport,
+                    server_cast_id,
+                    world,
+                );
+                return Ok(());
+            }
+        }
+
         self.cast_spell_inner(
             caster_guid,
             spell_id,

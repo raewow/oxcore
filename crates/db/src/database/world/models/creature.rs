@@ -43,6 +43,7 @@ pub struct CreatureTemplateRow {
     pub trainer_spell: i64,
     pub trainer_class: i64,
     pub trainer_race: i64,
+    pub pet_family: i64,
     pub rank: i64,
     pub spell_id1: i64,
     pub spell_id2: i64,

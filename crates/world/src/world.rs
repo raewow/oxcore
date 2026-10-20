@@ -584,6 +584,9 @@ impl World {
         {
             tracing::error!("Failed to load guild charters: {e:#}");
         }
+        if let Err(e) = self.systems.pet.load(&self.databases.character).await {
+            tracing::error!("Failed to load hunter pet numbering: {e:#}");
+        }
 
         // Load graveyard data (needs both DBC and world DB)
         {

@@ -330,6 +330,7 @@ pub async fn handle_player_login_with_guid(
     player.ammo_id = u32::try_from(character.ammo_id)?;
     player.explored_zones =
         crate::game::player::exploration::parse_saved(character.explored_zones.as_deref());
+    player.stable_slots = u8::try_from(character.stable_slots)?;
     crate::game::taxi::flight::load_for_login(
         world,
         &mut player.taxi,

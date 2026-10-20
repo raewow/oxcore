@@ -315,6 +315,8 @@ pub struct CreatureManager {
     inhabit_types: DashMap<u32, u8>,
     /// Who a trainer teaches, for templates that set any of it.
     trainer_requirements: DashMap<u32, TrainerRequirements>,
+    /// The beast family of templates a hunter could tame.
+    pet_families: DashMap<u32, u8>,
     /// creature_spells lists by entry.
     spell_lists: DashMap<u32, Arc<Vec<crate::game::creature::ai::types::CreatureSpellsEntry>>>,
 }
@@ -338,6 +340,7 @@ impl CreatureManager {
             raid_lock_entries: dashmap::DashSet::new(),
             inhabit_types: DashMap::new(),
             trainer_requirements: DashMap::new(),
+            pet_families: DashMap::new(),
             spell_lists: DashMap::new(),
         }
     }
@@ -348,6 +351,22 @@ impl CreatureManager {
             .get(&entry)
             .map(|v| *v)
             .unwrap_or(INHABIT_GROUND_AND_WATER)
+    }
+
+    /// Whether hunters can tame this creature: a beast of a pet family flagged tameable.
+    pub fn is_tameable(&self, entry: u32) -> bool {
+        const CREATURE_TYPE_BEAST: u8 = 1;
+        const CREATURE_STATIC_FLAG_TAMEABLE: u32 = 0x0000_0010;
+        self.pet_families.contains_key(&entry)
+            && self.get_template(entry).is_some_and(|t| {
+                t.creature_type == CREATURE_TYPE_BEAST
+                    && t.static_flags1 & CREATURE_STATIC_FLAG_TAMEABLE != 0
+            })
+    }
+
+    #[cfg(test)]
+    pub fn set_pet_family_for_test(&self, entry: u32, family: u8) {
+        self.pet_families.insert(entry, family);
     }
 
     /// The class, race or spell a trainer requires of its students.
@@ -517,6 +536,10 @@ impl CreatureManager {
             };
             if trainer != TrainerRequirements::default() {
                 self.trainer_requirements.insert(entry, trainer);
+            }
+            let pet_family = checked_u8(row.pet_family, "creature_template.pet_family")?;
+            if pet_family != 0 {
+                self.pet_families.insert(entry, pet_family);
             }
             let inhabit = checked_u8(row.inhabit_type, "creature_template.inhabit_type")?;
             if inhabit != INHABIT_GROUND_AND_WATER {
@@ -1027,8 +1050,14 @@ impl CreatureManager {
         instance_id: u32,
         phase_mask: u32,
         faction: u32,
+        level: Option<u8>,
     ) -> Option<ObjectGuid> {
-        let template = self.get_template(entry)?;
+        let mut template = (*self.get_template(entry)?).clone();
+        // A tamed pet keeps its own level, and its stats follow it.
+        if let Some(level) = level {
+            template.min_level = level;
+            template.max_level = level;
+        }
         let class_stats = self.get_class_level_stats(template.unit_class, template.min_level);
         let counter = self.next_guid.fetch_add(1, Ordering::Relaxed);
         let guid = ObjectGuid::new_pet(entry, counter as u32);

@@ -67,6 +67,29 @@ impl DbcEntry for BankBagSlotPricesEntry {
     }
 }
 
+/// StableSlotPrices DBC entry: what the stable slot with this number costs.
+/// Format: "ni" (2 fields)
+#[derive(Debug, Clone)]
+pub struct StableSlotPricesEntry {
+    pub id: u32,
+    pub price: u32,
+}
+
+impl DbcEntry for StableSlotPricesEntry {
+    fn from_record(record: &DbcRecord) -> Result<Option<(u32, Self)>> {
+        let id = record
+            .get_u32(0)
+            .context("Failed to read StableSlotPrices ID")?;
+        if id == 0 {
+            return Ok(None);
+        }
+        let price = record
+            .get_u32(1)
+            .context("Failed to read StableSlotPrices price")?;
+        Ok(Some((id, Self { id, price })))
+    }
+}
+
 /// CreatureDisplayInfo DBC entry
 /// Format: "nixifxxxxxxx" (from DBCfmt.h)
 /// Contains display information for creatures

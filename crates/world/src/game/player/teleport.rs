@@ -210,7 +210,7 @@ pub fn resummon_pet(world: &World, player_guid: ObjectGuid) {
     else {
         return;
     };
-    if let Err(e) = world.systems.pet.summon(player_guid, entry, world) {
+    if let Err(e) = world.systems.pet.resummon(player_guid, entry, world) {
         tracing::warn!("Could not bring back pet {} for {:?}: {}", entry, player_guid, e);
     }
 }

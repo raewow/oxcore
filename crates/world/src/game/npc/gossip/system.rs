@@ -471,7 +471,7 @@ impl GossipSystem {
                     .await?;
             }
             gossip_option::STABLEPET => {
-                debug!("Stable masters are not implemented");
+                crate::handlers::stable::send_stable_list(world, player_guid, source_guid);
             }
             gossip_option::TRAINER => {
                 crate::handlers::trainer_handler::send_trainer_list(

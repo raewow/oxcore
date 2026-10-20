@@ -160,6 +160,8 @@ pub struct Player {
     pub environment: EnvironmentState,
     /// Target currently being looted
     pub looting_target: Option<ObjectGuid>,
+    /// Stable slots the hunter has bought.
+    pub stable_slots: u8,
     /// Areas the player has discovered, one bit per AreaTable explore flag.
     pub explored_zones: crate::game::player::exploration::ExploredZones,
     /// The gossip menu the player was last shown.
@@ -300,6 +302,7 @@ impl Player {
             ammo_id: 0,
             environment: EnvironmentState::default(),
             looting_target: None,
+            stable_slots: 0,
             explored_zones: [0; crate::game::player::exploration::EXPLORED_ZONE_FIELDS],
             gossip: Default::default(),
             current_banker_guid: None,

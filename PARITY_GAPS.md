@@ -75,6 +75,20 @@ field logic is Lua (`scripts/battlegrounds/`).
   discovered as the zone around them, and the outdoor-only aura checks that
   run alongside discovery are not done.
 
+## Hunter pets
+
+Tamed pets are kept, dismissed, called back, stabled and brought back after
+travel and login, but they are still simple followers:
+
+- **No pet experience, loyalty, happiness or training points.** A pet stays
+  at the level it was tamed at and loyalty is always 1.
+- **No pet spells or action bar** (SMSG_PET_SPELLS), so nothing to train or
+  untrain, and no renaming or pet name queries.
+- **Stats come from the creature's class table** at the pet's level rather
+  than the hunter pet formulas.
+- **Revive Pet only works on a pet that is out.** A pet that died and was put
+  away stays dead until then.
+
 ## Vendors
 
 - **Reputation discount is a stub.** `calculate_reputation_discount` in
@@ -82,8 +96,6 @@ field logic is Lua (`scripts/battlegrounds/`).
 
 ## Gossip
 
-- **Stable masters do nothing.** There is no pet stable, so the stable option
-  (shown to hunters) opens nothing and MSG_LIST_STABLED_PETS is unhandled.
 - **Pet skills cannot be untrained.** Hunter pets keep no spell book, so the
   untrain option never shows.
 - **Offline charter signers join with placeholder roster details.** A signer

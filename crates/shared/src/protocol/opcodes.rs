@@ -1072,7 +1072,9 @@ impl Opcode {
     // Pet Stable
     // ============================================================================
 
-    pub const MSG_LIST_STABLED_PETS: Opcode = Opcode { vanilla: 0x026E, ..Opcode::NONE }; // 623
+    /// The 1.14 request is `CMSG_REQUEST_STABLED_PETS`; its reply is [`Opcode::SMSG_PET_STABLE_LIST`].
+    pub const MSG_LIST_STABLED_PETS: Opcode = Opcode { vanilla: 0x026E, modern: 0x3491 }; // 623
+    pub const SMSG_PET_STABLE_LIST: Opcode = Opcode { modern: 0x2597, ..Opcode::NONE };
     pub const CMSG_STABLE_PET: Opcode = Opcode { vanilla: 0x026F, modern: 0x3169 }; // 624
     pub const CMSG_UNSTABLE_PET: Opcode = Opcode { vanilla: 0x0270, modern: 0x316A }; // 625
     pub const CMSG_BUY_STABLE_SLOT: Opcode = Opcode { vanilla: 0x0272, modern: 0x316C }; // 626
@@ -2364,6 +2366,7 @@ pub const ALL: &[(Opcode, &str)] = &[
     (Opcode::CMSG_PET_STOP_ATTACK, "CMSG_PET_STOP_ATTACK"),
     (Opcode::CMSG_REQUEST_PET_INFO, "CMSG_REQUEST_PET_INFO"),
     (Opcode::MSG_LIST_STABLED_PETS, "MSG_LIST_STABLED_PETS"),
+    (Opcode::SMSG_PET_STABLE_LIST, "SMSG_PET_STABLE_LIST"),
     (Opcode::CMSG_STABLE_PET, "CMSG_STABLE_PET"),
     (Opcode::CMSG_UNSTABLE_PET, "CMSG_UNSTABLE_PET"),
     (Opcode::CMSG_BUY_STABLE_SLOT, "CMSG_BUY_STABLE_SLOT"),
@@ -2703,8 +2706,8 @@ mod tests {
         // duplicate check would silently start passing on an empty set.
         assert_eq!(
             declared_opcodes().len(),
-            714,
-            "expected 714 opcode constants; update this count deliberately when adding opcodes"
+            715,
+            "expected 715 opcode constants; update this count deliberately when adding opcodes"
         );
     }
 

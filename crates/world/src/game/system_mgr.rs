@@ -446,6 +446,7 @@ impl SystemManager {
         self.ticket.on_player_login(guid).await?;
         self.experience.on_player_login(guid)?;
         self.talents.on_player_login(guid, world).await?; // Reapply talent effects
+        self.pet.on_player_login(guid, world).await; // Bring back a hunter's pet
         Ok(())
     }
 

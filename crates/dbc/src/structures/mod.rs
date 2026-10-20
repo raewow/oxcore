@@ -17,7 +17,7 @@ pub use emote::EmotesTextEntry;
 pub use faction::{FactionDbcEntry, FactionTemplateDbcEntry};
 pub use item_object::{
     AuctionHouseEntry, BankBagSlotPricesEntry, CreatureDisplayInfoEntry, CreatureModelDataEntry,
-    GameObjectDisplayInfoEntry, ItemEntry, LockEntry,
+    GameObjectDisplayInfoEntry, ItemEntry, LockEntry, StableSlotPricesEntry,
 };
 pub use skill::{SkillLineAbilityEntry, SkillLineEntry, SkillRaceClassInfoEntry, SkillTiersEntry};
 pub use spell::{
