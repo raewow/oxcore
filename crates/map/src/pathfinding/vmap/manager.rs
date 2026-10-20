@@ -3,7 +3,7 @@
 
 use super::bsp_tree::{BSPModelInstance, BSPTree};
 use super::dynamic_tree::DynamicMapTree;
-use super::file_loader::{MapTileData, VMapFileLoader};
+use super::file_loader::{VMapFileLoader, WorldModelData};
 use super::go_model_list::{load_gameobject_model_list, GameObjectModelData};
 use super::model_transform::{place_static_model, place_world_model};
 use super::types::{
@@ -12,7 +12,7 @@ use super::types::{
 };
 use oxcore_shared::protocol::Position;
 use parking_lot::RwLock;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
@@ -22,6 +22,53 @@ fn map_bounds() -> BoundingBox {
     BoundingBox {
         min: Position::new(-17066.0, -17066.0, -1000.0, 0.0),
         max: Position::new(17066.0, 17066.0, 1000.0, 0.0),
+    }
+}
+
+/// One tile's static collision (or a non-tiled map's global model), with the bounds of its
+/// models so a query can skip the trees it cannot touch.
+struct StaticTree {
+    bounds: BoundingBox,
+    tree: BSPTree,
+}
+
+impl StaticTree {
+    fn bounds_of(models: &[Arc<BSPModelInstance>]) -> Option<BoundingBox> {
+        let first = models.first()?.bounding_box;
+        Some(models.iter().fold(first, |mut b, m| {
+            let mb = &m.bounding_box;
+            b.min = Position::new(
+                b.min.x.min(mb.min.x),
+                b.min.y.min(mb.min.y),
+                b.min.z.min(mb.min.z),
+                0.0,
+            );
+            b.max = Position::new(
+                b.max.x.max(mb.max.x),
+                b.max.y.max(mb.max.y),
+                b.max.z.max(mb.max.z),
+                0.0,
+            );
+            b
+        }))
+    }
+
+    /// Whether a vertical query at (x, y) can meet any of this tree's models.
+    fn reaches_column(&self, x: f32, y: f32) -> bool {
+        x >= self.bounds.min.x
+            && x <= self.bounds.max.x
+            && y >= self.bounds.min.y
+            && y <= self.bounds.max.y
+    }
+
+    /// Whether a segment's bounding box overlaps this tree's models.
+    fn reaches_segment(&self, from: &Position, to: &Position) -> bool {
+        from.x.max(to.x) >= self.bounds.min.x
+            && from.x.min(to.x) <= self.bounds.max.x
+            && from.y.max(to.y) >= self.bounds.min.y
+            && from.y.min(to.y) <= self.bounds.max.y
+            && from.z.max(to.z) >= self.bounds.min.z
+            && from.z.min(to.z) <= self.bounds.max.z
     }
 }
 
@@ -50,10 +97,14 @@ pub struct VMapManager {
     /// Loaded map trees (map_id -> loaded flag)
     /// Loaded `.vmtree` files: the map's global model when it is not tiled.
     loaded_trees: RwLock<HashMap<u32, Option<ModelInstance>>>,
-    /// Loaded tiles (map_id -> (tile_x, tile_y) -> tile data)
-    loaded_tiles: RwLock<HashMap<u32, HashMap<(u32, u32), MapTileData>>>,
-    /// BSP trees per map (map_id -> tree)
-    bsp_trees: RwLock<HashMap<u32, Arc<BSPTree>>>,
+    /// Loaded tiles (map_id -> (tile_x, tile_y))
+    loaded_tiles: RwLock<HashMap<u32, HashSet<(u32, u32)>>>,
+    /// Static collision per map: one tree per loaded tile, plus a non-tiled map's global model.
+    ///
+    /// Loading a tile builds only that tile's tree. A single tree per map had to be rebuilt from
+    /// every loaded tile each time one more loaded, which grew without bound as a continent
+    /// filled in. Each model lives in exactly one tree, so a query asks every tree it can reach.
+    static_trees: RwLock<HashMap<u32, Vec<StaticTree>>>,
     /// Runtime gameobject collision, keyed by (map_id, instance_id).
     dynamic_trees: RwLock<HashMap<(u32, u32), Arc<DynamicMapTree>>>,
     /// Collision model file + bounds per GameObjectDisplayInfo display id
@@ -91,7 +142,7 @@ impl VMapManager {
             loaded,
             loaded_trees: RwLock::new(HashMap::new()),
             loaded_tiles: RwLock::new(HashMap::new()),
-            bsp_trees: RwLock::new(HashMap::new()),
+            static_trees: RwLock::new(HashMap::new()),
             dynamic_trees: RwLock::new(HashMap::new()),
             gameobject_models,
         }
@@ -111,6 +162,10 @@ impl VMapManager {
         if !self.loaded_trees.read().contains_key(&map_id) {
             match self.file_loader.load_map_tree(map_id) {
                 Ok(tree_data) => {
+                    self.add_static_tree(
+                        map_id,
+                        self.place_spawns(tree_data.global_model.as_slice()),
+                    );
                     self.loaded_trees
                         .write()
                         .insert(map_id, tree_data.global_model);
@@ -128,24 +183,17 @@ impl VMapManager {
         let tile_key = (tile_x, tile_y);
 
         let mut tiles = self.loaded_tiles.write();
-        let map_tiles = tiles.entry(map_id).or_insert_with(HashMap::new);
+        let map_tiles = tiles.entry(map_id).or_default();
 
-        if !map_tiles.contains_key(&tile_key) {
+        if !map_tiles.contains(&tile_key) {
             match self.file_loader.load_map_tile(map_id, tile_x, tile_y) {
                 Ok(Some(tile_data)) => {
-                    map_tiles.insert(tile_key, tile_data);
+                    map_tiles.insert(tile_key);
+                    self.add_static_tree(map_id, self.place_spawns(&tile_data.model_instances));
                 }
                 Ok(None) => {
                     // Tile doesn't exist - normal for tiles without VMap data
-                    map_tiles.insert(
-                        tile_key,
-                        MapTileData {
-                            map_id,
-                            tile_x,
-                            tile_y,
-                            model_instances: Vec::new(),
-                        },
-                    );
+                    map_tiles.insert(tile_key);
                 }
                 Err(e) => {
                     warn!(
@@ -156,60 +204,45 @@ impl VMapManager {
                 }
             }
         }
-        drop(tiles);
-
-        // Rebuild BSP tree for this map from all loaded tiles
-        self.rebuild_bsp_tree(map_id);
 
         VMapLoadResult::Ok
     }
 
-    /// Rebuild the BSP tree for a map from all loaded tiles
-    fn rebuild_bsp_tree(&self, map_id: u32) {
+    /// Build a tree from one batch of placed models and add it to the map's static collision.
+    fn add_static_tree(&self, map_id: u32, models: Vec<Arc<BSPModelInstance>>) {
+        let Some(bounds) = StaticTree::bounds_of(&models) else {
+            return;
+        };
+        debug!(
+            "Building BSP tree for map {} from {} models",
+            map_id,
+            models.len()
+        );
         let mut tree = BSPTree::new(map_bounds());
+        tree.build(models);
+        self.static_trees
+            .write()
+            .entry(map_id)
+            .or_default()
+            .push(StaticTree { bounds, tree });
+    }
 
-        // A non-tiled map's single global model plus every loaded tile's spawns.
-        let mut spawns: Vec<ModelInstance> = self
-            .loaded_trees
-            .read()
-            .get(&map_id)
-            .and_then(|global| global.clone())
-            .into_iter()
-            .collect();
-        if let Some(map_tiles) = self.loaded_tiles.read().get(&map_id) {
-            for tile_data in map_tiles.values() {
-                spawns.extend(tile_data.model_instances.iter().cloned());
+    /// Place static model spawns in the world, reading each distinct model file once.
+    fn place_spawns(&self, spawns: &[ModelInstance]) -> Vec<Arc<BSPModelInstance>> {
+        let mut models: HashMap<&str, Option<WorldModelData>> = HashMap::new();
+        let mut placed = Vec::new();
+        for spawn in spawns {
+            let model = models.entry(&spawn.model_name).or_insert_with(|| {
+                self.file_loader
+                    .load_world_model(&spawn.model_name)
+                    .map_err(|e| debug!("Failed to load world model '{}': {}", spawn.model_name, e))
+                    .ok()
+            });
+            if let Some(model) = model {
+                placed.extend(place_static_model(model, spawn));
             }
         }
-
-        let mut bsp_models = Vec::new();
-        for model_instance in &spawns {
-            match self
-                .file_loader
-                .load_world_model(&model_instance.model_name)
-            {
-                Ok(world_model) => {
-                    bsp_models.extend(place_static_model(&world_model, model_instance));
-                }
-                Err(e) => {
-                    debug!(
-                        "Failed to load world model '{}': {}",
-                        model_instance.model_name, e
-                    );
-                }
-            }
-        }
-
-        if !bsp_models.is_empty() {
-            debug!(
-                "Building BSP tree for map {} from {} models",
-                map_id,
-                bsp_models.len()
-            );
-            tree.build(bsp_models);
-        }
-
-        self.bsp_trees.write().insert(map_id, Arc::new(tree));
+        placed
     }
 
     /// Check line of sight between two points.
@@ -240,8 +273,10 @@ impl VMapManager {
         }
 
         // Static world geometry. No VMap loaded means we assume a clear view.
-        if let Some(tree) = self.bsp_trees.read().get(&map_id) {
-            if tree.raycast_with_filter(&from, &to, ignore_m2) {
+        if let Some(trees) = self.static_trees.read().get(&map_id) {
+            if trees.iter().any(|t| {
+                t.reaches_segment(&from, &to) && t.tree.raycast_with_filter(&from, &to, ignore_m2)
+            }) {
                 return false;
             }
         }
@@ -275,10 +310,20 @@ impl VMapManager {
             return None;
         }
         let pos = Position::new(x, y, z, 0.0);
-        self.bsp_trees
-            .read()
-            .get(&map_id)
-            .and_then(|tree| tree.get_height(&pos, max_search_dist))
+        let trees = self.static_trees.read();
+        let mut best: Option<f32> = None;
+        for t in trees.get(&map_id).into_iter().flatten() {
+            if !t.reaches_column(x, y) {
+                continue;
+            }
+            if let Some(h) = t.tree.get_height(&pos, max_search_dist) {
+                // The surface nearest the query, as a single tree picks between its halves.
+                if best.is_none_or(|b| (z - h).abs() < (z - b).abs()) {
+                    best = Some(h);
+                }
+            }
+        }
+        best
     }
 
     /// Get ground height at a position, searching at most `max_search_dist`.
@@ -323,12 +368,12 @@ impl VMapManager {
             return false;
         }
 
-        let trees = self.bsp_trees.read();
-        if let Some(tree) = trees.get(&map_id) {
-            tree.get_area_info(&pos).is_some()
-        } else {
-            false
-        }
+        let trees = self.static_trees.read();
+        trees
+            .get(&map_id)
+            .into_iter()
+            .flatten()
+            .any(|t| t.reaches_column(pos.x, pos.y) && t.tree.get_area_info(&pos).is_some())
     }
 
     /// Get the liquid volume at a position from WMO geometry.
@@ -344,10 +389,13 @@ impl VMapManager {
         z: f32,
         req_liquid_type: u32,
     ) -> Option<WmoLiquidInfo> {
-        let trees = self.bsp_trees.read();
-        let tree = trees.get(&map_id)?;
+        let trees = self.static_trees.read();
         let pos = Position::new(x, y, z, 0.0);
-        let liquid = tree.get_liquid_level(&pos, req_liquid_type)?;
+        let liquid = trees
+            .get(&map_id)?
+            .iter()
+            .filter(|t| t.reaches_column(x, y))
+            .find_map(|t| t.tree.get_liquid_level(&pos, req_liquid_type))?;
 
         Some(WmoLiquidInfo {
             level: liquid.level,
@@ -522,7 +570,7 @@ impl VMapManager {
 
     /// Unload shared VMap data and every instance's collision for this map.
     pub fn unload_map(&self, map_id: u32) {
-        self.bsp_trees.write().remove(&map_id);
+        self.static_trees.write().remove(&map_id);
         self.loaded_tiles.write().remove(&map_id);
         self.loaded_trees.write().remove(&map_id);
         self.dynamic_trees.write().retain(|&(owner_map, _), tree| {
@@ -573,9 +621,7 @@ mod tests {
     }
 
     fn add_static_floor(mgr: &VMapManager, map_id: u32) {
-        let mut tree = BSPTree::new(map_bounds());
-        tree.build(floor(0.0));
-        mgr.bsp_trees.write().insert(map_id, Arc::new(tree));
+        mgr.add_static_tree(map_id, floor(0.0));
     }
 
     #[test]
