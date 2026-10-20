@@ -568,6 +568,7 @@ mod tests {
                 v2: Position::new(0.0, 5.0, z, 0.0),
             }],
             liquid_data: None,
+            footprint: Default::default(),
         })]
     }
 
@@ -656,6 +657,7 @@ mod tests {
                 v2: Position::new(0.0, 0.0, 10.0, 0.0),
             }],
             liquid_data: None,
+            footprint: Default::default(),
         });
         mgr.dynamic_tree_or_create(36, 1)
             .insert(7, vec![wall.clone()], true);

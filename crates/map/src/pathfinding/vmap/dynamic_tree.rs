@@ -178,6 +178,7 @@ mod tests {
                 },
             ],
             liquid_data: None,
+            footprint: Default::default(),
         })]
     }
 

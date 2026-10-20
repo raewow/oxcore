@@ -257,6 +257,7 @@ fn place_with(
             bounding_box: bbox,
             triangles,
             liquid_data,
+            footprint: Default::default(),
         }));
     }
 

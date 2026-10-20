@@ -3,7 +3,7 @@
 use super::file_loader::Triangle;
 use super::types::{AreaInfo, BoundingBox, LiquidLevel, ModelType};
 use oxcore_shared::protocol::Position;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 /// BSP tree node
 #[derive(Debug)]
@@ -35,6 +35,84 @@ pub struct BSPModelInstance {
     pub bounding_box: BoundingBox,
     pub triangles: Vec<Triangle>,
     pub liquid_data: Option<LiquidLevel>,
+    /// Triangles bucketed by footprint, built on the first height query.
+    pub footprint: OnceLock<FootprintGrid>,
+}
+
+impl BSPModelInstance {
+    /// Indices of the triangles whose x/y footprint may contain the point, in index order.
+    fn triangles_under(&self, x: f32, y: f32) -> &[u32] {
+        self.footprint
+            .get_or_init(|| FootprintGrid::build(&self.bounding_box, &self.triangles))
+            .at(x, y)
+    }
+}
+
+/// A coarse 2D grid over a model: each cell lists every triangle whose x/y bounds overlap it.
+///
+/// A vertical query then tests the few triangles of one cell instead of the whole model, which
+/// for a large WMO group is thousands. Cell lookup floors and clamps the same way for triangles
+/// and points, so a triangle whose bounds contain a point is always listed in that point's cell.
+#[derive(Debug, Clone, Default)]
+pub struct FootprintGrid {
+    min_x: f32,
+    min_y: f32,
+    cell: f32,
+    cols: usize,
+    rows: usize,
+    cells: Vec<Vec<u32>>,
+}
+
+impl FootprintGrid {
+    /// Aim for about this many triangles per cell.
+    const TRIANGLES_PER_CELL: usize = 8;
+    const MAX_SIDE: usize = 64;
+
+    fn build(bounds: &BoundingBox, triangles: &[Triangle]) -> Self {
+        let extent = (bounds.max.x - bounds.min.x).max(bounds.max.y - bounds.min.y);
+        let side = ((triangles.len() / Self::TRIANGLES_PER_CELL) as f32)
+            .sqrt()
+            .ceil()
+            .clamp(1.0, Self::MAX_SIDE as f32);
+        let cell = (extent / side).max(0.001);
+        let mut grid = Self {
+            min_x: bounds.min.x,
+            min_y: bounds.min.y,
+            cell,
+            cols: (((bounds.max.x - bounds.min.x) / cell).ceil() as usize).clamp(1, Self::MAX_SIDE),
+            rows: (((bounds.max.y - bounds.min.y) / cell).ceil() as usize).clamp(1, Self::MAX_SIDE),
+            cells: Vec::new(),
+        };
+        grid.cells = vec![Vec::new(); grid.cols * grid.rows];
+        for (index, t) in triangles.iter().enumerate() {
+            let (c0, c1) = (
+                grid.col(t.v0.x.min(t.v1.x).min(t.v2.x)),
+                grid.col(t.v0.x.max(t.v1.x).max(t.v2.x)),
+            );
+            let (r0, r1) = (
+                grid.row(t.v0.y.min(t.v1.y).min(t.v2.y)),
+                grid.row(t.v0.y.max(t.v1.y).max(t.v2.y)),
+            );
+            for row in r0..=r1 {
+                for col in c0..=c1 {
+                    grid.cells[row * grid.cols + col].push(index as u32);
+                }
+            }
+        }
+        grid
+    }
+
+    fn col(&self, x: f32) -> usize {
+        (((x - self.min_x) / self.cell).floor().max(0.0) as usize).min(self.cols - 1)
+    }
+
+    fn row(&self, y: f32) -> usize {
+        (((y - self.min_y) / self.cell).floor().max(0.0) as usize).min(self.rows - 1)
+    }
+
+    fn at(&self, x: f32, y: f32) -> &[u32] {
+        &self.cells[self.row(y) * self.cols + self.col(x)]
+    }
 }
 
 /// BSP tree for spatial queries
@@ -276,29 +354,29 @@ impl BSPTree {
                 left,
                 right,
             } => {
-                let pos_val = match axis {
-                    Axis::X => pos.x,
-                    Axis::Y => pos.y,
-                    Axis::Z => pos.z,
+                // The search runs straight down from `pos`, so it spans the split only on Z.
+                // On X and Y it lies on one side, and a model straddling the split is listed
+                // on both, so the other side holds nothing the search can reach.
+                let (low, high) = match axis {
+                    Axis::X => (pos.x, pos.x),
+                    Axis::Y => (pos.y, pos.y),
+                    Axis::Z => (pos.z - max_search_dist, pos.z),
                 };
+                let left_height = (low < *split_value)
+                    .then(|| self.get_height_node(left, pos, max_search_dist))
+                    .flatten();
+                let right_height = (high >= *split_value)
+                    .then(|| self.get_height_node(right, pos, max_search_dist))
+                    .flatten();
 
-                if (pos_val - split_value).abs() < max_search_dist {
-                    let left_height = self.get_height_node(left, pos, max_search_dist);
-                    let right_height = self.get_height_node(right, pos, max_search_dist);
-
-                    match (left_height, right_height) {
-                        (Some(lh), Some(rh)) => {
-                            let dist_l = (pos.z - lh).abs();
-                            let dist_r = (pos.z - rh).abs();
-                            Some(if dist_l < dist_r { lh } else { rh })
-                        }
-                        (Some(h), None) | (None, Some(h)) => Some(h),
-                        (None, None) => None,
+                match (left_height, right_height) {
+                    (Some(lh), Some(rh)) => {
+                        let dist_l = (pos.z - lh).abs();
+                        let dist_r = (pos.z - rh).abs();
+                        Some(if dist_l < dist_r { lh } else { rh })
                     }
-                } else if pos_val < *split_value {
-                    self.get_height_node(left, pos, max_search_dist)
-                } else {
-                    self.get_height_node(right, pos, max_search_dist)
+                    (Some(h), None) | (None, Some(h)) => Some(h),
+                    (None, None) => None,
                 }
             }
             BSPNode::Leaf { models } => {
@@ -320,7 +398,8 @@ impl BSPTree {
                         continue;
                     }
 
-                    for triangle in &model.triangles {
+                    for &index in model.triangles_under(pos.x, pos.y) {
+                        let triangle = &model.triangles[index as usize];
                         if let Some(height) =
                             self.get_height_from_triangle(pos, triangle, max_search_dist)
                         {
@@ -347,6 +426,16 @@ impl BSPTree {
         let v0 = &triangle.v0;
         let v1 = &triangle.v1;
         let v2 = &triangle.v2;
+
+        // Nearly every triangle a query reaches lies off to the side of the point; reject those
+        // on their footprint before paying for the normal.
+        if pos.x < v0.x.min(v1.x).min(v2.x)
+            || pos.x > v0.x.max(v1.x).max(v2.x)
+            || pos.y < v0.y.min(v1.y).min(v2.y)
+            || pos.y > v0.y.max(v1.y).max(v2.y)
+        {
+            return None;
+        }
 
         let edge1 = Position::new(v1.x - v0.x, v1.y - v0.y, v1.z - v0.z, 0.0);
         let edge2 = Position::new(v2.x - v0.x, v2.y - v0.y, v2.z - v0.z, 0.0);
