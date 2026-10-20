@@ -305,7 +305,7 @@ impl SpellManager {
     /// Load spell_target_position table (coordinates for teleport spells)
     async fn load_target_positions(&self, world_db: &PgPool) -> Result<()> {
         let rows = sqlx::query(
-            "SELECT id, target_map, \
+            "SELECT id::bigint, target_map::bigint, \
                     target_position_x, target_position_y, target_position_z, target_orientation \
               FROM world.spell_target_position",
         )
@@ -496,7 +496,8 @@ impl SpellManager {
 
         // 3. `spell_chain` SQL table: authoritative custom cases + `req` field updates.
         let rows = sqlx::query(
-            "SELECT spell_id, prev_spell, first_spell, rank, req_spell FROM world.spell_chain",
+            "SELECT spell_id::bigint, prev_spell::bigint, first_spell::bigint, rank::bigint, \
+             req_spell::bigint FROM world.spell_chain",
         )
         .fetch_all(world_db)
         .await;
@@ -878,7 +879,7 @@ impl SpellManager {
         let mut map = HashMap::new();
         let mut count = 0u32;
 
-        let rows = sqlx::query("SELECT entry, charges FROM world.spell_enchant_charges")
+        let rows = sqlx::query("SELECT entry::bigint, charges FROM world.spell_enchant_charges")
             .fetch_all(world_db)
             .await;
 
@@ -919,7 +920,7 @@ impl SpellManager {
         let mut map: HashMap<u16, PetAura> = HashMap::new();
         let mut count = 0u32;
 
-        let rows = match sqlx::query("SELECT spell, pet, aura FROM world.spell_pet_auras")
+        let rows = match sqlx::query("SELECT spell::bigint, pet, aura FROM world.spell_pet_auras")
             .fetch_all(world_db)
             .await
         {
@@ -1033,7 +1034,9 @@ impl SpellManager {
         quest_manager: &QuestManager,
     ) -> Result<()> {
         let rows = sqlx::query(
-            "SELECT spell, area, quest_start, quest_start_active, quest_end, aura_spell, racemask, gender, autocast FROM world.spell_area",
+            "SELECT spell::bigint, area, quest_start, quest_start_active <> 0 AS quest_start_active, \
+             quest_end, aura_spell::bigint, racemask, gender::bigint, autocast <> 0 AS autocast \
+             FROM world.spell_area",
         )
         .fetch_all(world_db)
         .await;
@@ -1156,7 +1159,7 @@ impl SpellManager {
     /// Populates `existing_spell_ids` with all spell IDs from `spell_template`.
     async fn load_existing_spell_ids(&self, world_db: &PgPool) -> Result<()> {
         let mut ids = Vec::new();
-        if let Ok(rows) = sqlx::query("SELECT DISTINCT entry FROM world.spell_template")
+        if let Ok(rows) = sqlx::query("SELECT DISTINCT entry::bigint AS entry FROM world.spell_template")
             .fetch_all(world_db)
             .await
         {
@@ -1380,7 +1383,8 @@ impl SpellManager {
 
         // Load from SQL table
         let rows = sqlx::query(
-            "SELECT entry, spellid AS spell_id, active FROM world.spell_learn_spell WHERE build_min <= $1 AND build_max >= $2",
+            "SELECT entry::bigint, \"SpellID\"::bigint AS spell_id, \"Active\" <> 0 AS active \
+             FROM world.spell_learn_spell WHERE build_min <= $1 AND build_max >= $2",
         )
         .bind(i64::from(CLASSIC_CLIENT_BUILD))
         .bind(i64::from(CLASSIC_CLIENT_BUILD))
@@ -1453,7 +1457,8 @@ impl SpellManager {
         let mut count = 0u32;
 
         let rows = sqlx::query(
-            "SELECT entry, type, targetentry AS target_entry, conditionid AS condition_id, inverseeffectmask AS effect_mask FROM world.spell_script_target",
+            "SELECT entry::bigint, type::bigint, \"targetEntry\" AS target_entry, \"conditionId\" AS condition_id, \
+             \"inverseEffectMask\" AS effect_mask FROM world.spell_script_target",
         )
         .fetch_all(world_db)
         .await;
