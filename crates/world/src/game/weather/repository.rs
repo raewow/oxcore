@@ -19,10 +19,12 @@ impl WeatherRepository {
     /// Load `game_weather` into (zone_id, chances) pairs.
     pub async fn load_zone_chances(&self) -> anyhow::Result<Vec<(u32, WeatherZoneChances)>> {
         let rows = sqlx::query_as::<_, WeatherRow>(
-            "SELECT zone, spring_rain_chance, spring_snow_chance, spring_storm_chance, \
-              summer_rain_chance, summer_snow_chance, summer_storm_chance, \
-              fall_rain_chance, fall_snow_chance, fall_storm_chance, \
-              winter_rain_chance, winter_snow_chance, winter_storm_chance \
+            "SELECT zone, spring_rain_chance::bigint, spring_snow_chance::bigint, \
+              spring_storm_chance::bigint, summer_rain_chance::bigint, \
+              summer_snow_chance::bigint, summer_storm_chance::bigint, \
+              fall_rain_chance::bigint, fall_snow_chance::bigint, fall_storm_chance::bigint, \
+              winter_rain_chance::bigint, winter_snow_chance::bigint, \
+              winter_storm_chance::bigint \
               FROM world.game_weather",
         )
         .fetch_all(&self.pool)
