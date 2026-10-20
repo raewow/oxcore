@@ -1386,6 +1386,10 @@ pub async fn handle_player_login_with_guid(
 
     // Build player create block
     let player_block = build_player_create_block_for_player(&player_ref, world)?;
+    // The reference holds the player's map shard read-locked. Everything below writes to the
+    // player, and the honour load awaits while doing so; holding it would deadlock this task
+    // against itself and the world tick against both.
+    drop(player_ref);
 
     // Combine into single SMSG_UPDATE_OBJECT
     let mut update_object = SmsgUpdateObject::new();
